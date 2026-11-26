@@ -24,13 +24,25 @@ After that the tool works offline. Run the second command again to refresh the r
     ip2fqdn scans/*.xml extra.txt 10.9.9.9 --dns-server 10.0.0.10 -o names.csv
     ip2fqdn -m default,mdns --skip netbios 10.0.1.0/24 --dns-server 10.0.0.10
     ip2fqdn --zones corp.example --dns-server 10.0.0.10 10.0.1.0/24 -o names.csv
+    ip2fqdn www.client.example extranet.client.example --dns-server 1.1.1.1 -o web.csv
     SHODAN_API_KEY=... ip2fqdn -m passive public-ips.txt -o public.csv
     cat ips.txt | ip2fqdn - -m free -o public.csv      # run it again each day: see API cache
     ip2fqdn --list-methods
 
-Inputs (any mix): IP, CIDR range (every address, network and broadcast included), `-` (IP
-list on stdin), IP list file (one IP or CIDR per line, `#` comments), nmap or masscan XML
-file. A file named like an IP is read with `./10.0.0.1`. Stderr says how each file was read.
+Inputs (any mix): IP, CIDR range (every address, network and broadcast included), host name,
+`-` (IP list on stdin), IP list file (one IP, CIDR range or host name per line, `#` comments),
+nmap or masscan XML file. A file named like an IP is read with `./10.0.0.1`. Stderr says how
+each file was read.
+
+Host names (at least one dot; `.local` accepted) are resolved before the lookups, A and AAAA
+with CNAMEs followed, by the `--dns-server` servers only: the tool cannot tell an internal name
+from a public one before asking, so names never go to the servers of `/etc/resolv.conf`.
+Without `--dns-server`, stderr starts and ends with `--dns-server missing: N host names in the
+input not resolved (...)`, and a run with only names stops (exit 2): add the client's DNS
+server, or a public resolver such as 1.1.1.1 for public names. The addresses found join the
+list (they count toward `--max-ips`) and each name gets a row with source `input`, as does each
+CNAME target followed. A name with no address gets a warning; a missing file ending in `.txt`,
+`.xml` and the like is an error, never a host name.
 
 ## Options
 
@@ -39,6 +51,7 @@ file. A file named like an IP is read with `./10.0.0.1`. Stderr says how each fi
 | `-m`, `--methods LIST` | methods and presets to run (default: `default`) |
 | `--skip LIST` | methods and presets to leave out |
 | `-o`, `--output FILE` | CSV file (default: stdout); also enables the API cache |
+| `--merge-results` | with `-o`: keep the rows already in FILE and add the new ones, without duplicates |
 | `--dns-server IP[:PORT][,...]` | DNS servers to query, `[::1]:5353` for IPv6 with a port (default: `/etc/resolv.conf`, see protected rule) |
 | `--protected-dns` | DNS queries only to `--dns-server` servers, whatever the input |
 | `--zones LIST` | zones for `axfr` and `dns-enum`; also transferred from their own name servers |
@@ -96,6 +109,7 @@ of each name found, kept when a DNS server returns its SOA.
 ## Confidentiality rules
 
 - Third-party services receive public addresses only; stderr gives the number skipped.
+- Host names given as input are resolved only by `--dns-server` servers (see Inputs).
 - Protected DNS rule: when any listed address is not public (or with `--protected-dns`), DNS
   queries go only to `--dns-server` servers, never to those of `/etc/resolv.conf`. A named
   server with a public address is used too, with a note: name only the client's own servers
@@ -112,24 +126,47 @@ without names gets a row with only `ip`). Control characters are written `\xNN`.
 
 | Column | Content |
 |---|---|
-| `ip` | listed IP |
+| `ip` | listed IP, or an address of a listed host name |
 | `fqdn` | name, lowercased, no trailing dot |
-| `source` | method |
-| `detail` | where the name came from (`443 SAN`, `PTR @10.0.0.10`, `445 NTLM DNS computer name`), `; ` between places |
+| `source` | method; `input` for a listed host name and the CNAME targets followed |
+| `detail` | where the name came from (`443 SAN`, `PTR @10.0.0.10`, `445 NTLM DNS computer name`, `A @10.0.0.10, CNAME edge.cdn.example`), `; ` between places |
 | `name_kind` | `dotted`, `short`, `local`, `wildcard` |
 | `labels` | `generic` (IPv4 octets in the name), `placeholder` (shared device names), `shared` (Cloudflare or CloudFront address) |
 | `dns` | forward confirmation: `match`, `other`, `none`, `error`, empty if not checked |
 | `sni` | `served`, `not-served`, `error`, empty if not checked |
 | `first_seen`, `last_seen` | local time with offset; empty when the source gives no date |
 
-Stderr: how inputs were read, notes, then one summary line per method (IPs done, rows,
-timeouts, errors, dropped names, method counters such as `certificates unreadable`), total
-time and where the output went. A progress line is refreshed on a terminal.
+Stderr: how inputs were read, notes, then the summary: host names resolved (`input: N host
+names, M addresses, K without address`), one line per method (IPs done, rows, timeouts, errors,
+dropped names, method counters such as `certificates unreadable`), total time and where the
+output went.
+
+Progress: on a terminal, one line redrawn every second shows the elapsed time, the names found
+and each method still running with its count done/total, plus `checks` while forward
+confirmations are pending:
+
+    ip2fqdn 3:10  52 names  tls 254/1270  onyphe 0/61 (no progress for 72 s)  checks 12/20
+
+When stderr goes to a file, the same text is written as a plain line every 60 s (`progress
+3:10  52 names ...`); follow it with `tail -f`. Counts: IP and port pairs for probes, IP and
+server pairs for `ptr`, public IPs for third-party services (those answered from the API cache
+count as done), zone and server pairs for `axfr`, queries for `dns-enum`, names for `input`,
+`sni` and `checks`. `(no progress for N s)` appears after 10 s without a unit done.
 
 API cache: with `-o FILE`, every third-party answer is appended to `FILE.api-cache`; a later
 run with the same `-o FILE` asks each service only the IPs it has not answered yet. Delete the
 file to refresh. Services with daily quotas (VirusTotal, urlscan, mnemonic) are spread over days
 by running the same command again each day.
+
+Merging: with `--merge-results`, the rows already in the `-o` file are kept, whatever the
+current input, and the new ones are added. A row that is already there (same `ip`, `fqdn` and
+`source`) is updated: places added to `detail`, earliest `first_seen` and latest `last_seen`,
+newer `dns`, `sni` and `labels` unless the new run left them empty. An IP's empty row goes once
+it has a name. A file that is not an ip2fqdn CSV (other header, a cell of `ip` that is not an
+IP) stops the run before any traffic (exit 2) and is left as it is. Stderr: `FILE: N rows
+before, M after merge`, or `FILE: new file`. Without the option the file is replaced. Either
+way the CSV is written to `FILE.tmp` and then renamed, so an interruption never leaves half a
+file.
 
 Ctrl-C or SIGTERM writes what was found so far ("interrupted: results incomplete"); a second
 Ctrl-C quits at once.

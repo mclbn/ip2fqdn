@@ -126,7 +126,11 @@ class Log:
     def status(self, text):
         if not self.tty:
             return
-        self.stream.write("\r\x1b[K" + sanitize(text))
+        text = sanitize(text)
+        width = _terminal_width(self.stream)
+        if len(text) >= width:
+            text = text[:max(0, width - 4)] + "..."
+        self.stream.write("\r\x1b[K" + text)
         self.stream.flush()
         self._status_shown = True
 
@@ -134,6 +138,13 @@ class Log:
         if self._status_shown:
             self.stream.write("\r\x1b[K")
             self._status_shown = False
+
+
+def _terminal_width(stream):
+    try:
+        return os.get_terminal_size(stream.fileno()).columns
+    except (AttributeError, OSError, ValueError):
+        return 80
 
 
 def _isatty(stream):

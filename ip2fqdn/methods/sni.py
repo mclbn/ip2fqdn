@@ -47,6 +47,7 @@ async def _worker(ctx, results):
                 statuses.append(await _check(ip, port, name, ctx, results))
             ctx.set_sni(ip, name, _combine(statuses))
             ctx.done(ip)
+            ctx.advance()
     finally:
         results.put_nowait(None)
 

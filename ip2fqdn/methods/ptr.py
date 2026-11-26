@@ -21,9 +21,11 @@ WORKERS_PER_SERVER = 50
 
 async def lookup_all(ips, ctx):
     servers = ctx.dns.active()
+    ctx.set_total(len(ips) * len(servers))
     pairs = ((ip, server) for ip in ips for server in servers)
     async for result in aio.stream(pairs, lambda pair: _ptr(pair, ctx),
                                    WORKERS_PER_SERVER * len(servers)):
+        ctx.advance()
         if isinstance(result, Exception):
             ctx.failure(result)
             continue

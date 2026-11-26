@@ -95,17 +95,20 @@ def choose_servers(named, resolv, has_private, protected_dns, log):
     protected = protected_dns or has_private
     if named:
         if has_private:
-            for server in named:
-                if is_public(server.ip):
-                    log.note(f"internal addresses in the input: DNS server {server.label()} "
-                             "has a public address; it receives the internal addresses and "
-                             "names of this run")
+            note_public_servers(named, log)
         servers = named
     elif protected:
         servers = []
     else:
         servers = resolv
     return servers, protected
+
+
+def note_public_servers(servers, log):
+    for server in servers:
+        if is_public(server.ip):
+            log.note(f"internal addresses in the input: DNS server {server.label()} has a public "
+                     "address; it receives the internal addresses and names of this run")
 
 
 class Reply:
@@ -157,31 +160,33 @@ class DnsService:
                           "unanswered, dropped for the run")
 
     async def addresses(self, server, name):
-        statuses = await asyncio.gather(*(self._addresses_of_type(server, name, rdtype)
+        statuses = await asyncio.gather(*(self.chain(server, name, rdtype)
                                           for rdtype in ADDRESS_TYPES))
         found = set()
-        for status, values in statuses:
+        for status, values, _ in statuses:
             if status == "ok":
                 found |= values
         if found:
             return "ok", found
-        if all(status == "none" for status, _ in statuses):
+        if all(status == "none" for status, _, _ in statuses):
             return "none", found
         return "error", found
 
-    async def _addresses_of_type(self, server, name, rdtype):
+    async def chain(self, server, name, rdtype):
+        """Status ("ok", "none" or "error"), addresses, CNAME targets followed in order."""
+        aliases = []
         target = name
         for _ in range(MAX_CNAME_HOPS):
             reply = await self.query(server, target, rdtype)
             if reply is None or reply.rcode not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN):
-                return "error", set()
-            values, alias = _chain(reply, target, rdtype)
+                return "error", set(), aliases
+            values, alias = _chain(reply, target, rdtype, aliases)
             if values:
-                return "ok", values
+                return "ok", values, aliases
             if alias is None:
-                return "none", set()
+                return "none", set(), aliases
             target = alias
-        return "error", set()
+        return "error", set(), aliases
 
     async def is_zone_apex(self, name):
         for server in self.active():
@@ -194,7 +199,7 @@ class DnsService:
         return False
 
 
-def _chain(reply, name, rdtype):
+def _chain(reply, name, rdtype, aliases):
     start = current = dns.name.from_text(name)
     for _ in range(MAX_CNAME_HOPS + 1):
         values, alias = _scan_answer(reply, current, rdtype)
@@ -202,6 +207,7 @@ def _chain(reply, name, rdtype):
             return values, None
         if alias is None:
             return set(), None if current == start else current.to_text()
+        aliases.append(owner_text(alias))
         current = alias
     return set(), current.to_text()
 

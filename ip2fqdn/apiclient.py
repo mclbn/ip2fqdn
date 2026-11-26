@@ -94,8 +94,9 @@ class ApiClient:
         for attempt in range(len(waits) + 1):
             await self._pacer(ctx).wait()
             response = await self._send(ctx, url, method, headers, body)
-            if response is not None and response.status != 429 and \
-                    response.status not in RETRY_STATUSES:
+            if response is None:
+                break
+            if response.status != 429 and response.status not in RETRY_STATUSES:
                 self.failures[ctx.name] = 0
                 return response
             if attempt == len(waits):
@@ -118,11 +119,10 @@ class ApiClient:
         return response
 
     async def _wait(self, ctx, response, default):
-        seconds = _wait_seconds(response) if response is not None else None
+        seconds = _wait_seconds(response)
         if seconds is not None and seconds > QUOTA_WAIT:
             raise QuotaSpent(f"asked to wait {int(seconds)} s")
-        if response is not None and response.status == 429 and \
-                getattr(ctx.module, "RATE_BACKOFF", False):
+        if response.status == 429 and getattr(ctx.module, "RATE_BACKOFF", False):
             self._pacer(ctx).delay *= 2
         await asyncio.sleep(seconds if seconds is not None else default)
 

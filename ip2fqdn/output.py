@@ -49,6 +49,10 @@ def csv_text(rows):
 
 def summary_lines(run, elapsed):
     lines = []
+    if run.name_counts is not None:
+        names, addresses, missing = run.name_counts
+        lines.append(f"input: {names} host names, {addresses} addresses, {missing} without "
+                     "address")
     for module in run.plan.methods:
         ctx = run.contexts[module.NAME]
         parts = [f"{len(ctx.ips)} IPs", f"{ctx.rows} rows", f"{ctx.timeouts} timeouts",

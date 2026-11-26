@@ -22,7 +22,9 @@ REVERSE = ("in-addr.arpa", "ip6.arpa")
 async def lookup_all(ips, ctx):
     wanted = set(ips)
     jobs = await _jobs(ctx)
+    ctx.set_total(len(jobs))
     async for result in aio.stream(jobs, lambda job: _transfer(job, wanted, ctx), WORKERS):
+        ctx.advance()
         if isinstance(result, Exception):
             ctx.failure(result)
             continue

@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import os
@@ -10,9 +11,12 @@ import fakes
 import ntlm_vectors
 import pytest
 from conftest import SITE_DIR
-from helpers import run_cli
+from helpers import make_run, run_cli
 from test_active import http_server, rdp_server
 from test_windows import smb_server
+
+from ip2fqdn import dnsclient, runner
+from ip2fqdn.common import Log
 
 WINDOWS, WEB, DEAD, SLOW, DNS = "127.0.1.10", "127.0.1.11", "127.0.1.12", "127.0.1.13", \
     "127.0.1.53"
@@ -110,8 +114,142 @@ def test_protected_rule_without_named_server(lab):
     assert {row["source"] for row in rows} == {"smb"} and all(not r["dns"] for r in rows)
 
 
+def name_records():
+    return {("www.corp.test", "A"): ["127.0.1.11"],
+            ("app.corp.test", "CNAME"): ["edge.cdn.test."],
+            ("edge.cdn.test", "A"): ["127.0.1.11", "127.0.1.12"],
+            ("v6.corp.test", "AAAA"): ["::1"],
+            ("11.1.0.127.in-addr.arpa", "PTR"): ["web01.corp.test."],
+            ("corp.test", "SOA"): ["ns1.corp.test. admin.corp.test. 1 60 60 60 60"]}
+
+
+def test_host_name_inputs(tmp_path):
+    listing = tmp_path / "names.txt"
+    listing.write_text("www.corp.test\nmissing.corp.test\n")
+    fake = fakes.FakeDns(name_records())
+    with fakes.FakeNetwork() as network:
+        port = fakes.start_dns(network, DNS, fake)
+        server = f"{DNS}:{port}"
+        code, out, err = run_cli([str(listing), "app.corp.test", "v6.corp.test", "ips.tx",
+                                  "-m", "ptr,dns-enum", f"--dns-server={server}"])
+        too_many = run_cli(["app.corp.test", "--max-ips", "1", "-m", "ptr",
+                            f"--dns-server={server}"])
+    assert code == 0, err
+    rows = {(row["ip"], row["fqdn"], row["source"]): row for row in _rows(out)}
+    www = rows[("127.0.1.11", "www.corp.test", "input")]
+    assert (www["detail"], www["dns"], www["name_kind"]) == (f"A @{server}", "match", "dotted")
+    assert rows[("127.0.1.12", "app.corp.test", "input")]["detail"] == \
+        f"A @{server}, CNAME edge.cdn.test"
+    edge = rows[("127.0.1.12", "edge.cdn.test", "input")]
+    assert (edge["detail"], edge["dns"]) == (f"CNAME of app.corp.test, A @{server}", "match")
+    assert rows[("::1", "v6.corp.test", "input")]["detail"] == f"AAAA @{server}"
+    assert ("127.0.1.11", "web01.corp.test", "ptr") in rows
+    assert ("corp.test", "SOA") in fake.queries
+    assert f"{listing}:2: missing.corp.test: no address" in err
+    assert "ips.tx: no such file, and no address as a host name" in err
+    assert "input: 5 host names, 3 addresses, 2 without address" in err
+    assert too_many[0] == 2 and "more than 1 IPs to look up" in too_many[2]
+
+
+def test_host_names_need_named_server(monkeypatch):
+    fake = fakes.FakeDns(name_records())
+    with fakes.FakeNetwork() as network:
+        port = fakes.start_dns(network, DNS, fake)
+        monkeypatch.setattr(dnsclient, "resolv_conf_servers",
+                            lambda: [dnsclient.DnsServer(DNS, port, "resolv.conf")])
+        code, out, err = run_cli(["51.83.59.99", "www.corp.test", "-m", "ptr"])
+        only_names = run_cli(["www.corp.test", "app.corp.test", "-m", "ptr"])
+    assert code == 0, err
+    message = ("--dns-server missing: 1 host names in the input not resolved (www.corp.test); "
+               "host names are resolved only by servers given with --dns-server")
+    assert err.count(message) == 2
+    assert err.rindex(message) > err.index("total time")
+    assert ("99.59.83.51.in-addr.arpa", "PTR") in fake.queries
+    assert not [query for query in fake.queries if query[0].endswith("corp.test")]
+    assert [row["ip"] for row in _rows(out)] == ["51.83.59.99"]
+    assert only_names[0] == 2
+    assert "error: --dns-server missing: 2 host names in the input not resolved " \
+        "(www.corp.test, app.corp.test)" in only_names[2]
+
+
+def test_merge_results(tmp_path):
+    output = tmp_path / "out.csv"
+    fake = fakes.FakeDns({("10.1.0.127.in-addr.arpa", "PTR"): ["dc01.corp.test."],
+                          ("11.1.0.127.in-addr.arpa", "PTR"): ["web01.corp.test."]})
+    with fakes.FakeNetwork() as network:
+        port = fakes.start_dns(network, DNS, fake)
+        base = ["-m", "ptr", "--no-forward-confirm", f"--dns-server={DNS}:{port}", "-o",
+                str(output), "--merge-results"]
+        first = run_cli([WINDOWS, *base])
+        second = run_cli([WEB, DEAD, *base])
+        again = run_cli([WEB, DEAD, *base])
+        merged = output.read_text()
+        foreign = tmp_path / "foreign.csv"
+        foreign.write_text("name,value\n")
+        queries = len(fake.queries)
+        refused = run_cli([WINDOWS, *base[:-3], "-o", str(foreign), "--merge-results"])
+        assert len(fake.queries) == queries
+    assert first[0] == 0 and f"{output}: new file" in first[2]
+    assert second[0] == 0 and f"{output}: 1 rows before, 3 after merge" in second[2]
+    assert again[0] == 0 and f"{output}: 3 rows before, 3 after merge" in again[2]
+    assert [(row["ip"], row["fqdn"]) for row in _rows(merged)] == [
+        (WINDOWS, "dc01.corp.test"), (WEB, "web01.corp.test"), (DEAD, "")]
+    assert refused[0] == 2 and "not an ip2fqdn CSV (header differs), not merged" in refused[2]
+    assert foreign.read_text() == "name,value\n"
+    assert not os.path.exists(f"{output}.tmp")
+    code, _, err = run_cli([WINDOWS, "--merge-results"])
+    assert code == 2 and "--merge-results needs -o FILE" in err
+
+
+def test_progress_lines_when_not_a_terminal(monkeypatch):
+    monkeypatch.setattr(runner, "PROGRESS_EVERY", 0.3)
+    with fakes.FakeNetwork() as network:
+        port = fakes.free_port()
+        network.tcp(SLOW, port, fakes.silent_handler())
+        code, _, err = run_cli([SLOW, "-m", "tls", f"--tls-ports={port}", "--connect-timeout",
+                                "1", "--timeout", "1.5"])
+    assert code == 0, err
+    assert "progress 0:00  0 names  tls 0/1\n" in err
+    assert "\r" not in err
+
+
+def test_sni_progress_counts_names(lab):
+    argv = [item for item in lab[0] if not item.startswith("--dns-server")]
+
+    async def go():
+        run = make_run(["-m", "tls,sni", *argv], ips=[WINDOWS, WEB])
+        await run.execute()
+        return run
+
+    sni = asyncio.run(go()).contexts["sni"]
+    assert sni.counting and sni.total >= 2 and sni.progress() == sni.total and not sni.running
+
+
+def test_progress_counts_reach_totals():
+    fake = fakes.FakeDns({("10.1.0.127.in-addr.arpa", "PTR"): ["dc01.corp.test."],
+                          ("www.corp.test", "A"): ["127.0.1.10"],
+                          ("corp.test", "SOA"): ["ns1.corp.test. admin.corp.test. 1 60 60 60 60"]},
+                         {"corp.test": [("fs01.corp.test", "A", "127.0.1.10")]})
+
+    async def go(port):
+        log = Log(io.StringIO())
+        service = dnsclient.DnsService([dnsclient.DnsServer(DNS, port)], log)
+        run = make_run(["-m", "ptr,axfr,dns-enum"], ips=[WINDOWS], dns=service, log=log)
+        run.inputs.names = {"www.corp.test": None}
+        await run.execute()
+        return run
+
+    with fakes.FakeNetwork() as network:
+        run = asyncio.run(go(fakes.start_dns(network, DNS, fake)))
+    for ctx in (run.input_ctx, *run.contexts.values()):
+        assert (ctx.total, ctx.progress(), ctx.running) == (ctx.total, ctx.total, False), ctx.name
+        assert ctx.total, ctx.name
+    assert run.contexts["dns-enum"].total == 16 and run.contexts["axfr"].total == 1
+
+
 def test_usage_errors():
-    assert run_cli(["nosuchfile.txt"])[0] == 2
+    code, _, err = run_cli(["nosuchfile.txt"])
+    assert code == 2 and "error: nosuchfile.txt: no such file" in err
     assert run_cli(["10.0.0.1", "-m", "bogus"])[0] == 2
     code, _, err = run_cli(["10.0.0.0/8"])
     assert code == 2 and "--max-ips" in err

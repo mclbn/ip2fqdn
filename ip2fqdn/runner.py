@@ -1,15 +1,26 @@
 import asyncio
 import time
+from collections import Counter
+from types import SimpleNamespace
 
-from ip2fqdn.addresses import is_public
+import dns.rdatatype
+
+from ip2fqdn.addresses import is_public, sort_key
 from ip2fqdn.apiclient import MethodOff, QuotaSpent
+from ip2fqdn.common import Finding
 from ip2fqdn.context import Limits, MethodContext
+from ip2fqdn.dnsclient import ADDRESS_TYPES, note_public_servers
+from ip2fqdn.inputs import SHOWN_INVALID, too_many
 from ip2fqdn.names import name_kind
 from ip2fqdn.results import Results, confirm_eligible, sni_eligible
 
-STATUS_EVERY = 3.0
+STATUS_EVERY = 1.0
+PROGRESS_EVERY = 60.0
+STALL_AFTER = 10.0
 DNS_RANK = {"match": 0, "other": 1, "none": 2, "error": 3}
 SNI_DONE = object()
+# Source of the rows for host names given as input (D55); not a method, so not selectable.
+INPUT = SimpleNamespace(NAME="input", KIND="dns", PHASE=1, PARALLEL=None, TIMEOUT=None)
 
 
 class Run:
@@ -24,6 +35,12 @@ class Run:
         self.results = Results(inputs.ips)
         self.limits = Limits(args.parallel)
         self.contexts = {module.NAME: MethodContext(module, self) for module in plan.methods}
+        self.input_ctx = MethodContext(INPUT, self)
+        if "sni" in self.contexts:
+            self.contexts["sni"].set_total(0)
+        self.name_counts = None
+        self.final_warnings = []
+        self.previous_rows = None
         self.zones = []
         self.confirm = dns is not None and not args.no_forward_confirm
         self.confirmations = {}
@@ -32,11 +49,13 @@ class Run:
         self.sni_live = False
         self.sni_seen = set()
         self.phase = 1
-        self.started = time.time()
+        self.started = time.monotonic()
 
     async def execute(self):
         status = asyncio.create_task(self._status_loop())
         try:
+            await self.resolve_names()
+            self._note_private()
             api_tasks = [self._spawn(self._run_whole(module)) for module in self.plan.methods
                          if module.KIND == "api"]
             await self._quick_phase()
@@ -54,6 +73,63 @@ class Run:
             status.cancel()
             for task in list(self.background):
                 task.cancel()
+
+    async def resolve_names(self):
+        names = self.inputs.names
+        if not names or self.dns is None:
+            return
+        had_private = any(not is_public(ip) for ip in self.inputs.ips)
+        self.input_ctx.set_total(len(names))
+        self.input_ctx.begin()
+        try:
+            results = await asyncio.gather(*(self._resolve_name(name) for name in names))
+        finally:
+            self.input_ctx.running = False
+        added = {finding.ip for findings in results for finding in findings}
+        everything = set(self.inputs.ips) | added
+        if len(everything) > self.args.max_ips:
+            raise too_many(self.args.max_ips)
+        self.inputs.ips = sorted(everything, key=sort_key)
+        missing = [(name, origin) for (name, origin), findings in zip(names.items(), results)
+                   if not findings]
+        for name, origin in missing[:SHOWN_INVALID]:
+            if origin is None:
+                self.log.warning(f"{name}: no such file, and no address as a host name")
+            else:
+                self.log.warning(f"{origin}: {name}: no address")
+        if len(missing) > SHOWN_INVALID:
+            self.log.warning(f"{len(missing)} host names without address in all")
+        self.name_counts = (len(names), len(added), len(missing))
+        self.log.debug("input names resolved", names=len(names), addresses=len(added))
+        if not had_private and any(not is_public(ip) for ip in added):
+            note_public_servers(self.dns.servers, self.log)
+        for findings in results:
+            for finding in findings:
+                self.input_ctx.add(finding)
+
+    async def _resolve_name(self, name):
+        findings = []
+        for server in self.dns.active():
+            chains = await asyncio.gather(*(self.dns.chain(server, name, rdtype)
+                                            for rdtype in ADDRESS_TYPES))
+            for rdtype, (status, values, aliases) in zip(ADDRESS_TYPES, chains):
+                if status != "ok":
+                    continue
+                record = f"{dns.rdatatype.to_text(rdtype)} @{server.label()}"
+                via = f", CNAME {' > '.join(aliases)}" if aliases else ""
+                for ip in sorted(values, key=sort_key):
+                    findings.append(Finding(ip, name, record + via))
+                    findings.extend(Finding(ip, alias, f"CNAME of {name}, {record}")
+                                    for alias in aliases)
+        self.input_ctx.advance()
+        return findings
+
+    def _note_private(self):
+        if self.api is None:
+            return
+        skipped = sum(1 for ip in self.inputs.ips if not is_public(ip))
+        if skipped:
+            self.log.note(f"third-party services: {skipped} non-public addresses skipped")
 
     def _spawn(self, coroutine):
         task = asyncio.create_task(coroutine)
@@ -73,6 +149,10 @@ class Run:
     async def _run_lookups(self, modules):
         if not modules:
             return
+        totals = Counter(module.NAME for module, _, _ in self.plan.lookup_tasks(modules,
+                                                                               self.inputs))
+        for module in modules:
+            self.contexts[module.NAME].set_total(totals[module.NAME])
         tasks = self.plan.lookup_tasks(modules, self.inputs)
         bound = self.plan.task_bound(modules, self.inputs)
         count = max(1, min(self.args.parallel, bound))
@@ -93,6 +173,7 @@ class Run:
                 await self._lookup(ctx, module, ip, port)
 
     async def _lookup(self, ctx, module, ip, port):
+        ctx.begin()
         ctx.done(ip)
         found = 0
         started = time.monotonic()
@@ -104,6 +185,9 @@ class Run:
                         ctx.add(item)
             except Exception as error:
                 ctx.failure(error, ip)
+        ctx.advance()
+        if ctx.finished >= ctx.total:
+            ctx.running = False
         if found or self.log.debugging and time.monotonic() - started > ctx.connect_timeout:
             ctx.debug("lookup", ip=ip, port=port, names=found,
                       seconds=round(time.monotonic() - started, 2))
@@ -111,13 +195,20 @@ class Run:
     async def _run_whole(self, module):
         ctx = self.contexts[module.NAME]
         ips = self.inputs.ips
+        total = len(ips)
         if module.KIND == "api":
-            ips = self._api_ips(ctx)
+            public = [ip for ip in ips if is_public(ip)]
+            total = len(public)
+            ips = self._api_ips(ctx, public)
         started = time.monotonic()
         ctx.debug("start", ips=len(ips), phase=module.PHASE)
+        if not ctx.counting:
+            ctx.total = total
+        ctx.begin()
         try:
             await self._consume(ctx, module, ips)
         finally:
+            ctx.running = False
             ctx.debug("end", rows=ctx.rows, seconds=round(time.monotonic() - started, 1))
 
     async def _consume(self, ctx, module, ips):
@@ -134,8 +225,7 @@ class Run:
         except Exception as error:
             ctx.failure(error)
 
-    def _api_ips(self, ctx):
-        public = [ip for ip in self.inputs.ips if is_public(ip)]
+    def _api_ips(self, ctx, public):
         if self.cache is None:
             return public
         return self.cache.remaining(ctx, public)
@@ -208,7 +298,7 @@ class Run:
         if "sni" not in self.contexts:
             return
         for (ip, name), source in list(self.results.names.items()):
-            module = self.plan.by_name[source]
+            module = INPUT if source == INPUT.NAME else self.plan.by_name[source]
             if source != "sni" and (module.PHASE == 1) and sni_eligible(name, ip):
                 self._put_sni(ip, name)
 
@@ -216,6 +306,7 @@ class Run:
         if (ip, name) in self.sni_seen or not self.results.tls_ports.get(ip):
             return
         self.sni_seen.add((ip, name))
+        self.contexts["sni"].set_total(len(self.sni_seen))
         self.sni_queue.put_nowait((ip, name, sorted(self.results.tls_ports[ip])))
 
     async def sni_next(self):
@@ -248,10 +339,33 @@ class Run:
         self.zones = zones
 
     async def _status_loop(self):
-        if not self.log.tty:
-            return
+        """One redrawn line on a terminal, otherwise a plain line every minute (D57)."""
+        tty = self.log.tty
         while True:
-            await asyncio.sleep(STATUS_EVERY)
-            elapsed = int(time.time() - self.started)
-            self.log.status(f"ip2fqdn: phase {min(self.phase, 2)}, "
-                            f"{len(self.results.names)} names, {elapsed} s")
+            await asyncio.sleep(STATUS_EVERY if tty else PROGRESS_EVERY)
+            text = progress_text(self, time.monotonic())
+            if tty:
+                self.log.status(f"ip2fqdn {text}")
+            else:
+                self.log.note(f"progress {text}")
+
+
+def progress_text(run, now):
+    parts = [clock(now - run.started), f"{len(run.results.names)} names"]
+    for ctx in (run.input_ctx, *run.contexts.values()):
+        if not ctx.running:
+            continue
+        text = ctx.name if ctx.total is None else f"{ctx.name} {ctx.progress()}/{ctx.total}"
+        if ctx.last_progress is not None and now - ctx.last_progress >= STALL_AFTER:
+            text += f" (no progress for {int(now - ctx.last_progress)} s)"
+        parts.append(text)
+    checked = sum(1 for task in run.confirmations.values() if task.done())
+    if checked < len(run.confirmations):
+        parts.append(f"checks {checked}/{len(run.confirmations)}")
+    return "  ".join(parts)
+
+
+def clock(seconds):
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"

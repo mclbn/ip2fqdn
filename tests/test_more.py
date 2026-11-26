@@ -17,7 +17,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from test_end_to_end import DNS, WEB, WINDOWS, lab  # noqa: F401
 
-from ip2fqdn import cli, dnsclient, nmapxml, ranges
+from ip2fqdn import apiclient, cli, dnsclient, merge, nmapxml, ranges
+from ip2fqdn.common import UsageError
 from ip2fqdn.methods import axfr, mdns, onyphe, shodan
 from ip2fqdn.proto import certs
 
@@ -173,6 +174,27 @@ def test_api_field_extraction_never_crashes(document):
             shodan.banner_findings("8.8.8.8", banner)
 
 
+ONYPHE_DOCUMENTS = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.text(max_size=20),
+    lambda children: st.lists(children, max_size=4) | st.dictionaries(
+        st.sampled_from(["ip", "@category", "hostname", "forward", "reverse", "subject",
+                         "commonname", "altname", "status", "error", "@timestamp",
+                         "seen_date"]), children, max_size=6), max_leaves=20)
+
+
+@settings(max_examples=200, deadline=None)
+@given(st.lists(ONYPHE_DOCUMENTS, max_size=6), st.binary(max_size=60))
+def test_onyphe_bulk_reader_never_crashes(documents, noise):
+    run = make_run(["-m", "onyphe"], ips=["8.8.8.8"], environ={"ONYPHE_API_KEY": "k"})
+    ctx = run.contexts["onyphe"]
+    body = b"\n".join(json.dumps(item).encode() for item in documents) + b"\n" + noise
+    body += b"\n" + b"[" * 100000
+    try:
+        onyphe.bulk_findings(["8.8.8.8", "1.1.1.1"], body, ctx)
+    except (apiclient.QuotaSpent, apiclient.MethodOff):
+        pass
+
+
 @settings(max_examples=150, deadline=None)
 @given(st.binary(max_size=300), st.integers(min_value=0, max_value=4000))
 def test_nmap_reader_never_crashes(noise, cut):
@@ -233,3 +255,32 @@ def test_ipv6_probes_on_loopback():
         code, out, _ = run_cli(["::1", "-m", "tls", f"--tls-ports={port}"])
     assert [f.name for f in found] == ["v6.corp.test"]
     assert code == 0 and "::1,v6.corp.test,tls" in out
+
+
+@settings(max_examples=200, deadline=None)
+@given(st.lists(st.lists(st.sampled_from(["10.0.0.1", "::1", "a.test", "ptr", "", "x;y",
+                                           "2026-11-26 09:00 +00:00", "bad", "\"", "\n"]),
+                         max_size=12), max_size=8))
+def test_merge_reader_never_crashes(tmp_path_factory, cells):
+    path = tmp_path_factory.mktemp("merge") / "out.csv"
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(merge.COLUMNS)
+    writer.writerows(cells)
+    path.write_text(buffer.getvalue())
+    try:
+        rows = merge.read_existing(str(path))
+    except UsageError:
+        return
+    merged = merge.merge_rows(rows, rows)
+    assert merge.merge_rows(merged, []) == merged
+
+
+def test_output_rewrite_keeps_file_mode(tmp_path):
+    output = tmp_path / "out.csv"
+    output.write_text("old\n")
+    output.chmod(0o600)
+    cli._replace_file(str(output), "new\n")
+    assert output.read_text() == "new\n" and (output.stat().st_mode & 0o777) == 0o600
+    assert not os.path.exists(f"{output}.tmp")
+    cli._replace_file(os.devnull, "discarded\n")

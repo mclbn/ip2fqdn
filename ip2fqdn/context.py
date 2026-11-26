@@ -1,5 +1,6 @@
 import asyncio
 import ssl
+import time
 from collections import Counter
 from contextlib import asynccontextmanager
 
@@ -27,6 +28,13 @@ class MethodContext:
         self.counts = Counter()
         self.stopped = None
         self.semaphore = asyncio.Semaphore(module.PARALLEL) if module.PARALLEL else None
+        # Progress (D57): total units, units done when the method counts its own (counting),
+        # otherwise the IPs done; running while the method works; time of the last unit done.
+        self.total = None
+        self.finished = 0
+        self.counting = False
+        self.running = False
+        self.last_progress = None
 
     @property
     def nmap(self):
@@ -58,7 +66,25 @@ class MethodContext:
         self.counts[key] += amount
 
     def done(self, ip):
-        self.ips.add(ip)
+        if ip not in self.ips:
+            self.ips.add(ip)
+            self.last_progress = time.monotonic()
+
+    def begin(self):
+        if not self.running:
+            self.running = True
+            self.last_progress = time.monotonic()
+
+    def set_total(self, total):
+        self.counting = True
+        self.total = total
+
+    def advance(self, amount=1):
+        self.finished += amount
+        self.last_progress = time.monotonic()
+
+    def progress(self):
+        return self.finished if self.counting else len(self.ips)
 
     def learn_zones(self, names):
         for name in names:

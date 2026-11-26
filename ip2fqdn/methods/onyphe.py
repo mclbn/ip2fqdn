@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 
 from ip2fqdn import apihelp
 from ip2fqdn.apiclient import RequestFailed
@@ -23,10 +24,21 @@ BULK = 100
 NO_CREDITS = 1005
 INVALID_KEY = 3
 NAME_FIELDS = ("hostname", "reverse", "forward")
+CATEGORIES = ("datascan", "riskscan", "ip", "pastries", "resolver", "sniffer", "topsite",
+              "whois", "none")
+
+
+def document_ips(document):
+    value = document.get("ip") if isinstance(document, dict) else None
+    if isinstance(value, str):
+        return [value]
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
 def document_findings(ip, document):
-    if not isinstance(document, dict) or document.get("ip") not in (ip, None):
+    if not isinstance(document, dict):
+        return []
+    if document.get("ip") is not None and ip not in document_ips(document):
         return []
     category = document.get("@category") or "?"
     when = apihelp.date_of(document.get("@timestamp")) or apihelp.date_of(
@@ -59,6 +71,32 @@ def _check_error(document, ctx):
     return code is None
 
 
+def bulk_findings(chunk, body, ctx):
+    found = {ip: [] for ip in chunk}
+    categories = Counter()
+    lines = ip_lists = 0
+    for line in body.splitlines():
+        lines += 1
+        try:
+            document = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if not _check_error(document, ctx):
+            return None
+        if not isinstance(document, dict):
+            categories["other"] += 1
+            continue
+        category = document.get("@category")
+        categories[category if category in CATEGORIES else "other"] += 1
+        ip_lists += isinstance(document.get("ip"), list)
+        for ip in document_ips(document):
+            if ip in found:
+                found[ip].extend(document_findings(ip, document))
+    ctx.debug("bulk lines", lines=lines, ip_lists=ip_lists,
+              categories=",".join(f"{name}:{n}" for name, n in sorted(categories.items())))
+    return found
+
+
 def _failure(response, document):
     code = _error_code(document)
     return f"HTTP {response.status}" + (f", Onyphe error {code}" if code else "")
@@ -86,18 +124,10 @@ class _Client:
             self.ctx.debug("bulk requests refused", status=response.status)
             self.bulk_ok = False
             return None
-        found = {ip: [] for ip in chunk}
-        for line in response.body.splitlines():
-            try:
-                document = json.loads(line)
-            except ValueError:
-                continue
-            if not _check_error(document, self.ctx):
-                self.bulk_ok = False
-                return None
-            ip = document.get("ip") if isinstance(document, dict) else None
-            if ip in found:
-                found[ip].extend(document_findings(ip, document))
+        found = bulk_findings(chunk, response.body, self.ctx)
+        if found is None:
+            self.bulk_ok = False
+            return None
         self.bulk_ok = True
         return [Answer(ip, findings) for ip, findings in found.items()]
 

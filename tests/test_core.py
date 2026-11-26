@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import os
@@ -5,7 +6,7 @@ import os
 import pytest
 from helpers import make_run
 
-from ip2fqdn import cli, dnsclient, nmapxml
+from ip2fqdn import cli, dnsclient, merge, nmapxml, runner
 from ip2fqdn.addresses import is_public
 from ip2fqdn.apicache import ApiCache
 from ip2fqdn.common import Answer, Finding, Log, UsageError, sanitize
@@ -104,13 +105,15 @@ def test_inputs_mix_files_ranges_and_stdin(tmp_path, data_dir):
                               "10.20.30.10"]
     assert inputs.ips[-1] == "2001:db8::1"
     text = stream.getvalue()
-    assert f"{listing}:5: not an IP or CIDR range, ignored" in text
+    assert f"{listing}:5: not an IP, CIDR range or host name, ignored" in text
     assert "nmap-windows-domain.xml: nmap XML, 4 hosts" in text
     assert "stdin: IP list, 2 entries" in text
 
 
 @pytest.mark.parametrize(("arguments", "message"), [
-    (["nosuchfile"], "not an IP or CIDR range, and no such file"),
+    (["nosuchfile"], "not an IP, CIDR range or host name, and no such file"),
+    (["*.corp.test"], "not an IP, CIDR range or host name, and no such file"),
+    (["scans/a.XML"], "scans/a.XML: no such file"),
     (["10.0.0.0/8"], "more than 1000 IPs"),
     (["2001:db8::/64"], "more than 1000 IPs"),
 ])
@@ -137,12 +140,55 @@ def test_no_ip_left(tmp_path):
         read_inputs([str(empty)], 10, log)
 
 
+def test_inputs_with_host_names(tmp_path):
+    listing = tmp_path / "list.txt"
+    listing.write_text("www.corp.test\nDC01\n*.corp.test\nsrv01.corp.local.\n10.0.0.1\n"
+                       "WWW.corp.test\n")
+    log, stream = _log()
+    inputs = read_inputs([str(listing), "app.corp.test", "ips.tx"], 100, log)
+    assert inputs.ips == ["10.0.0.1"]
+    assert inputs.names == {"www.corp.test": f"{listing}:1", "srv01.corp.local": f"{listing}:4",
+                            "app.corp.test": None, "ips.tx": None}
+    text = stream.getvalue()
+    assert f"{listing}:2: not an IP, CIDR range or host name, ignored" in text
+    assert f"{listing}:3: not an IP, CIDR range or host name, ignored" in text
+    assert f"{listing}: IP list, 1 entries, 3 host names" in text
+    only_names = read_inputs(["www.corp.test"], 100, log)
+    assert only_names.ips == [] and list(only_names.names) == ["www.corp.test"]
+
+
+def test_name_resolving_to_internal_address_notes_public_server():
+    class StubDns:
+        def __init__(self):
+            self.servers = [dnsclient.DnsServer("8.8.8.8")]
+
+        def active(self):
+            return self.servers
+
+        async def chain(self, server, name, rdtype):
+            if rdtype == dnsclient.ADDRESS_TYPES[0]:
+                return "ok", {"10.0.0.5"}, ["edge.corp.test"]
+            return "none", set(), []
+
+    log, stream = _log()
+    run = make_run(["-m", "ptr", "--no-forward-confirm"], ips=["51.83.59.99"], dns=StubDns(),
+                   log=log)
+    run.inputs.names = {"www.corp.test": None}
+    asyncio.run(run.resolve_names())
+    assert run.inputs.ips == ["10.0.0.5", "51.83.59.99"]
+    assert "DNS server 8.8.8.8 has a public address; it receives the internal addresses" \
+        in stream.getvalue()
+    rows = {(row.ip, row.name): row.details for row in run.results.rows.values()}
+    assert rows == {("10.0.0.5", "www.corp.test"): ["A @8.8.8.8, CNAME edge.corp.test"],
+                    ("10.0.0.5", "edge.corp.test"): ["CNAME of www.corp.test, A @8.8.8.8"]}
+
+
 def test_ip_list_shows_ten_invalid_lines_then_count(tmp_path):
     listing = tmp_path / "list.txt"
     listing.write_text("junk\n" * 15 + "10.0.0.1\n")
     log, stream = _log()
     read_inputs([str(listing)], 10, log)
-    assert stream.getvalue().count("not an IP or CIDR range, ignored") == 10
+    assert stream.getvalue().count("not an IP, CIDR range or host name, ignored") == 10
     assert "15 invalid lines in all" in stream.getvalue()
 
 
@@ -302,3 +348,92 @@ def test_dns_server_parsing_and_protected_rule():
     named = dnsclient.parse_servers("8.8.8.8")
     chosen, _ = dnsclient.choose_servers(named, resolv, False, True, log)
     assert [s.ip for s in chosen] == ["8.8.8.8"]
+
+
+def _csv_row(ip, fqdn="", source="", **values):
+    row = dict.fromkeys(merge.COLUMNS, "")
+    row.update(ip=ip, fqdn=fqdn, source=source, **values)
+    return row
+
+
+def test_merge_rows_rules():
+    old = [_csv_row("10.0.0.1", "a.test", "ptr", detail="PTR @10.0.0.53", dns="match",
+                    first_seen="2026-11-01 10:00 +01:00", last_seen="2026-11-01 10:00 +01:00"),
+           _csv_row("10.0.0.2"),
+           _csv_row("10.0.0.3", "c.test", "tls", detail="443 CN", sni="served",
+                    first_seen="01/11/2026", last_seen="01/11/2026")]
+    new = [_csv_row("10.0.0.1", "a.test", "ptr", detail="PTR @10.0.0.54; PTR @10.0.0.53",
+                    name_kind="dotted", first_seen="2026-11-26 09:00 +00:00",
+                    last_seen="2026-11-26 09:00 +00:00"),
+           _csv_row("10.0.0.2", "b.test", "smb", detail="445 NTLM DNS computer name"),
+           _csv_row("10.0.0.3", "c.test", "tls", detail="443 CN", sni="",
+                    first_seen="2026-11-26 09:00 +00:00", last_seen="2026-11-26 09:00 +00:00"),
+           _csv_row("10.0.0.4")]
+    merged = merge.merge_rows(old, new)
+    assert [(row["ip"], row["fqdn"]) for row in merged] == [
+        ("10.0.0.1", "a.test"), ("10.0.0.2", "b.test"), ("10.0.0.3", "c.test"), ("10.0.0.4", "")]
+    first = merged[0]
+    assert first["detail"] == "PTR @10.0.0.53; PTR @10.0.0.54"
+    assert (first["dns"], first["name_kind"]) == ("match", "dotted")
+    assert (first["first_seen"], first["last_seen"]) == ("2026-11-01 10:00 +01:00",
+                                                         "2026-11-26 09:00 +00:00")
+    third = merged[2]
+    assert third["sni"] == "served"
+    assert (third["first_seen"], third["last_seen"]) == ("2026-11-26 09:00 +00:00",
+                                                         "2026-11-26 09:00 +00:00")
+    assert merge.merge_rows(merged, merged) == merged
+
+
+def test_merge_reads_only_ip2fqdn_files(tmp_path):
+    missing = tmp_path / "none.csv"
+    assert merge.read_existing(str(missing)) is None
+    good = tmp_path / "good.csv"
+    good.write_text(",".join(merge.COLUMNS) + "\n10.0.0.1,a.test,ptr\n2001:db8::1\n")
+    rows = merge.read_existing(str(good))
+    assert [(row["ip"], row["fqdn"], row["dns"]) for row in rows] == [
+        ("10.0.0.1", "a.test", ""), ("2001:db8::1", "", "")]
+    foreign = tmp_path / "foreign.csv"
+    foreign.write_text("name,value\na,b\n")
+    with pytest.raises(UsageError, match="not an ip2fqdn CSV \\(header differs\\), not merged"):
+        merge.read_existing(str(foreign))
+    damaged = tmp_path / "damaged.csv"
+    damaged.write_text(",".join(merge.COLUMNS) + "\n10.0.0.1,a.test,ptr\nnot-an-ip,b.test,ptr\n")
+    with pytest.raises(UsageError, match="damaged.csv:3: not an IP in column ip, not merged"):
+        merge.read_existing(str(damaged))
+
+
+def test_progress_text():
+    class Task:
+        def __init__(self, finished):
+            self.finished = finished
+
+        def done(self):
+            return self.finished
+
+    run = make_run(["-m", "tls,ptr,internetdb,axfr"])
+    now = 1000.0
+    run.started = now - 42
+    run.results.names = {("127.0.1.1", f"n{i}.test"): "tls" for i in range(37)}
+    tls, internetdb, axfr = (run.contexts[name] for name in ("tls", "internetdb", "axfr"))
+    tls.set_total(1270)
+    tls.finished, tls.running, tls.last_progress = 254, True, now - 1
+    tls.ips.add("127.0.1.1")
+    internetdb.total, internetdb.running, internetdb.last_progress = 61, True, now - 72
+    axfr.set_total(5)
+    axfr.finished, axfr.running, axfr.last_progress = 2, True, now
+    run.confirmations = {"a.test": Task(True), "b.test": Task(False)}
+    assert runner.progress_text(run, now) == (
+        "0:42  37 names  tls 254/1270  internetdb 0/61 (no progress for 72 s)  axfr 2/5  "
+        "checks 1/2")
+    assert runner.clock(3725) == "1:02:05"
+
+
+def test_status_line_cut_to_terminal_width():
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    stream = Terminal()
+    Log(stream).status("x" * 200)
+    line = stream.getvalue().split("\r\x1b[K")[-1]
+    assert len(line) == 79 and line.endswith("...")

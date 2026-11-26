@@ -8,7 +8,8 @@ option. Run them only against networks and services you are allowed to query.
 
 - Install as the README says, with Internet access, then check `ip2fqdn --list-methods`.
 - Run every command with `--debug 2> tN.err`: debug lines are only added to stderr, the CSV and
-  the other stderr lines stay the same.
+  the other stderr lines stay the same. A `progress ...` line is written every 60 s; follow a
+  long run with `tail -f tN.err` in another terminal.
 - The default methods include `axfr`: zone transfer attempts, which DNS servers may log as an
   attack. If the client has not agreed to them, add `--skip axfr`.
 
@@ -125,13 +126,27 @@ Only hosts on the segment you are plugged into answer.
 
     ip2fqdn 192.168.1.0/24 -m default,mdns --dns-server <DNS IP> -o t8.csv --debug 2> t8.err
 
+### 9. Host names as input
+
+A few of the client's public web names in `names.txt` (one per line, some behind a CDN if
+possible), then the same file without `--dns-server`.
+
+    ip2fqdn names.txt --dns-server 1.1.1.1 -o t9.csv --debug 2> t9.err
+    ip2fqdn names.txt -m ptr
+
+Look for: `input` rows (CNAME targets included) and the other names found for each address;
+`input: N host names, M addresses, K without address` in the summary; `shared` labels on CDN
+addresses. Second command: `error: --dns-server missing: ...` and exit code 2 (`echo $?`).
+
 ## Points inferred from documentation, checked by these runs
 
 - Shodan (run 6): the `ip` facet of `/shodan/host/count` (value format, and whether the per-IP
   counts add up to `total`); whether batch lookups are accepted; with `--shodan-search`,
   whether range searches are refused; the 404 body.
-- Onyphe (run 6): whether `/bulk/summary/ip` is accepted (otherwise one request per IP), the
-  NDJSON lines for IPs without data, and the error code when credits run out (1005 assumed).
+- Onyphe (run 6): whether `/bulk/summary/ip` is accepted (it was, on one licence, 2026-11-26),
+  the NDJSON lines for IPs without data, the debug line `onyphe bulk lines` (line count, lines
+  whose `ip` is a list, count per category), and the error code when credits run out (1005
+  assumed).
 - VirusTotal and OTX on IPv6 addresses (run 6); urlscan's 429 headers, and its per-minute and
   per-hour limits with a key (https://urlscan.io/user/quotas/ while logged in; the tool sends
   one search every 36 s, with or without a key); mnemonic's 402.

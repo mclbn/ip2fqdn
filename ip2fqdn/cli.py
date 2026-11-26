@@ -1,13 +1,15 @@
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import resource
 import signal
+import stat
 import sys
 import time
 
-from ip2fqdn import VERSION, dnsclient, ranges
+from ip2fqdn import VERSION, dnsclient, merge, ranges
 from ip2fqdn.addresses import is_public
 from ip2fqdn.apicache import ApiCache
 from ip2fqdn.apiclient import ApiClient
@@ -18,12 +20,14 @@ from ip2fqdn.output import build_rows, csv_text, summary_lines
 from ip2fqdn.plan import PRESETS, build_plan
 from ip2fqdn.runner import Run
 
-DESCRIPTION = ("Find the FQDNs of a list of IP addresses. INPUT: IP, CIDR range, IP list file, "
+DESCRIPTION = ("Find the FQDNs of a list of IP addresses. INPUT: IP, CIDR range, host name "
+               "(resolved only with --dns-server), IP list file (IPs, ranges, host names), "
                "- (stdin), nmap or masscan XML file.")
 DNS_METHODS = ("ptr", "axfr", "dns-enum")
 EXIT_SIGNALS = {signal.SIGINT: 130, signal.SIGTERM: 143}
 FILE_MARGIN = 100
 FILES_PER_SERVER = 50
+SHOWN_NAMES = 5
 
 
 def positive_int(text):
@@ -52,6 +56,9 @@ def build_parser(methods=METHODS):
                         help="methods and presets to run (default: the default preset)")
     parser.add_argument("--skip", metavar="LIST", help="methods and presets to leave out")
     parser.add_argument("-o", "--output", metavar="FILE", help="CSV file (default: stdout)")
+    parser.add_argument("--merge-results", action="store_true",
+                        help="with -o: keep the rows already in FILE and add the new ones, "
+                             "without duplicates")
     parser.add_argument("--dns-server", metavar="IP[:PORT][,...]",
                         help="DNS servers to query (default: /etc/resolv.conf)")
     parser.add_argument("--protected-dns", action="store_true",
@@ -142,17 +149,48 @@ def _main(argv, stdin, stdout, log, environ):
     started = time.time()
     log.debug("start", version=VERSION, python=sys.version.split()[0])
     plan = build_plan(args, METHODS, log, environ)
+    previous = _merge_setup(args, log)
     inputs = read_inputs(args.inputs, args.max_ips, log, stdin)
+    names_warning = _unresolved_names(args, inputs, log)
     dns = _dns_setup(args, inputs, plan, log)
     _raise_file_limit(args, dns, log)
     cache = _cache_setup(args, plan, log)
     api = ApiClient(log, environ) if any(m.KIND == "api" for m in plan.methods) else None
-    if api is not None:
-        _note_private(inputs, log)
     run = Run(args, log, inputs, plan, dns, api, cache)
+    if names_warning:
+        run.final_warnings.append(names_warning)
+    run.previous_rows = previous
     shared = _shared_ranges(log)
     code = asyncio.run(_execute(run, args, stdout, log, shared, started))
     return code
+
+
+def _merge_setup(args, log):
+    """Rows of the existing output file with --merge-results (D56), read before any traffic."""
+    if not args.merge_results:
+        return None
+    if not args.output:
+        raise UsageError("--merge-results needs -o FILE")
+    rows = merge.read_existing(args.output)
+    if rows is None:
+        log.note(f"{args.output}: new file")
+    return rows
+
+
+def _unresolved_names(args, inputs, log):
+    """Host names are resolved only by servers named with --dns-server (D55)."""
+    if not inputs.names or args.dns_server and dnsclient.parse_servers(args.dns_server):
+        return None
+    names = list(inputs.names)
+    shown = ", ".join(names[:SHOWN_NAMES]) + (", ..." if len(names) > SHOWN_NAMES else "")
+    text = (f"--dns-server missing: {len(names)} host names in the input not resolved ({shown}); "
+            "host names are resolved only by servers given with --dns-server, such as the "
+            "client's DNS server or 1.1.1.1 for public names")
+    inputs.names = {}
+    if not inputs.ips:
+        raise UsageError(text)
+    log.warning(text)
+    return text
 
 
 def _dns_setup(args, inputs, plan, log):
@@ -208,12 +246,6 @@ def _cache_setup(args, plan, log):
     return cache
 
 
-def _note_private(inputs, log):
-    skipped = sum(1 for ip in inputs.ips if not is_public(ip))
-    if skipped:
-        log.note(f"third-party services: {skipped} non-public addresses skipped")
-
-
 def _shared_ranges(log):
     shared = ranges.load()
     if shared is None:
@@ -258,16 +290,39 @@ def _finish(run, args, stdout, log, shared, started, interrupted):
 
 
 def _write_output(run, args, stdout, log, shared):
-    text = csv_text(build_rows(run, shared))
+    rows = build_rows(run, shared)
+    if run.previous_rows is not None:
+        rows = merge.merge_rows(run.previous_rows, rows)
+        log.note(f"{args.output}: {len(run.previous_rows)} rows before, {len(rows)} after merge")
+    text = csv_text(rows)
     if not args.output:
         stdout.write(text)
         stdout.flush()
         return
     try:
-        with open(args.output, "w", encoding="utf-8", newline="") as handle:
-            handle.write(text)
+        _replace_file(args.output, text)
     except OSError as error:
         raise FatalError(f"cannot write {args.output}: {error.strerror}") from None
+
+
+def _replace_file(path, text):
+    """Write to PATH.tmp, then rename over PATH: never half a file (D56)."""
+    target = os.path.realpath(path)
+    if os.path.exists(target) and not os.path.isfile(target):
+        with open(target, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+        return
+    temporary = target + ".tmp"
+    try:
+        with open(temporary, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+        if os.path.exists(target):
+            os.chmod(temporary, stat.S_IMODE(os.stat(target).st_mode))
+        os.replace(temporary, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
 
 
 def _write_summary(run, args, log, started):
@@ -277,5 +332,7 @@ def _write_summary(run, args, log, started):
         run.cache.summary()
     where = args.output or "stdout"
     log.note(f"total time {show_duration(time.time() - started)}; output: {where}")
+    for text in run.final_warnings:
+        log.warning(text)
     log.debug("end", seconds=round(time.time() - started, 1),
               dns_queries=run.dns.queries if run.dns else 0)

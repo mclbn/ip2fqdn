@@ -10,7 +10,7 @@ import pytest
 from conftest import DATA_DIR
 from helpers import make_run, run_cli
 
-from ip2fqdn import apiclient, dnsclient
+from ip2fqdn import apiclient, dnsclient, runner
 from ip2fqdn.methods import internetdb, mnemonic, onyphe, otx, shodan, urlscan, virustotal
 
 API = "127.0.1.80"
@@ -50,7 +50,12 @@ class ApiFake:
                 status, extra, data = 404, {}, b'{"error": "no route"}'
                 for verb, prefix, reply in self.routes:
                     if verb == method and path.startswith(prefix):
-                        status, extra, data = reply(request)
+                        result = reply(request)
+                        if asyncio.iscoroutine(result):
+                            result = await result
+                        if result is None:
+                            return
+                        status, extra, data = result
                         break
                 if isinstance(data, str):
                     data = data.encode()
@@ -191,7 +196,7 @@ def test_onyphe_bulk(api_lab):
     assert not any(row["detail"].endswith(" domain") for row in _rows(out))
 
 
-def test_cache_second_run_and_quota_stop(api_lab, tmp_path):
+def test_cache_second_run_and_quota_stop(api_lab, tmp_path, monkeypatch):
     fake, environ, argv = api_lab
     calls = []
 
@@ -207,13 +212,22 @@ def test_cache_second_run_and_quota_stop(api_lab, tmp_path):
                            environ=environ)
     assert code == 0 and "mnemonic: quota spent" in err
     calls.clear()
-    fake.route("GET", "/pdns/v3/", _ok('{"data": [], "count": 0}'))
+
+    async def slow(request):
+        await asyncio.sleep(0.5)
+        return 200, {}, '{"data": [], "count": 0}'
+
+    fake.route("GET", "/pdns/v3/", slow)
+    monkeypatch.setattr(runner, "PROGRESS_EVERY", 0.1)
     code, _, err = run_cli(["8.8.8.8", "9.9.9.9", "-m", "mnemonic", "-o", output, *argv],
                            environ=environ)
     assert code == 0
     assert [r["path"] for r in fake.requests][-1] == "/pdns/v3/9.9.9.9"
     assert sum(r["path"] == "/pdns/v3/8.8.8.8" for r in fake.requests) == 1
     assert "API cache: 1 cached answers used" in err
+    progress = [line for line in err.splitlines() if line.startswith("progress ")
+                and "mnemonic" in line]
+    assert progress and all("mnemonic 1/2" in line for line in progress)
     with open(output, encoding="utf-8") as handle:
         rows = _rows(handle.read())
     assert ("8.8.8.8", "111001.xyz") in {(row["ip"], row["fqdn"]) for row in rows}
@@ -245,6 +259,42 @@ def test_retry_after_and_failures_switch_off(api_lab):
     assert code == 0
     assert "internetdb: 5 requests in a row failed; switched off" in err
     assert len(fake.requests) == 5 * 4
+
+
+def test_no_answer_is_not_retried(api_lab):
+    fake, environ, argv = api_lab
+    fake.route("GET", "/", lambda request: None)
+    code, _, err = run_cli(["8.8.8.8", "-m", "internetdb", *argv], environ=environ)
+    assert code == 0, err
+    assert len(fake.requests) == 1
+    assert "failed requests: 1" in err
+
+
+def test_onyphe_bulk_lines_with_ip_lists(api_lab):
+    fake, environ, argv = api_lab
+    environ["ONYPHE_API_KEY"] = "on-key"
+    lines = [
+        {"@category": "resolver", "ip": [PUBLIC_24 + "10", "203.0.113.99"],
+         "forward": "multi.example.com", "seen_date": "2026-11-20"},
+        {"@category": "datascan", "ip": PUBLIC_24 + "11", "hostname": ["web.example.com"]},
+        {"@category": "whois", "ip": {"weird": 1}, "hostname": "ignored.example.com"},
+        {"@category": "newcategory", "ip": [1, None, ["x"]], "hostname": "also.ignored.com"},
+        {"@category": "none", "ip": "8.8.8.8"},
+        [PUBLIC_24 + "10"],
+    ]
+    body = "\n".join(json.dumps(line) for line in lines) + "\n"
+    fake.route("POST", "/bulk/summary/ip", lambda request: (200, {}, body))
+    code, out, err = run_cli([PUBLIC_24 + "10", PUBLIC_24 + "11", "8.8.8.8", "-m", "onyphe",
+                              "--debug", *argv], environ=environ)
+    assert code == 0, err
+    rows = {(row["ip"], row["fqdn"]) for row in _rows(out)}
+    assert (PUBLIC_24 + "10", "multi.example.com") in rows
+    assert (PUBLIC_24 + "11", "web.example.com") in rows
+    assert ("8.8.8.8", "") in rows
+    assert not {name for _, name in rows} & {"ignored.example.com", "also.ignored.com"}
+    assert "onyphe bulk lines lines=6 ip_lists=2 categories=datascan:1,none:1,other:2," \
+        "resolver:1,whois:1" in err
+    assert len(fake.requests) == 1
 
 
 def test_shodan_batch_accepted_and_range_search(api_lab):

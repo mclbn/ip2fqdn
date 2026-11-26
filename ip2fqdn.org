@@ -161,21 +161,22 @@
     the IP; DNS and third-party methods still run for them.
   - Rejected: probing only open ports (a TCP-only scan would silently disable =netbios=);
     nmap files as a plain IP list (misses non-standard ports).
-- D10, settled: input types: IPs and CIDR ranges on the command line; IP list files, or =-=
-  for stdin; nmap or masscan XML files. DNS zone files: backlog (D25).
+- D10, settled: input types: IPs and CIDR ranges on the command line; IP list files, or =-= for
+  stdin; nmap or masscan XML files; host names (D55). DNS zone files: backlog (D25).
 - D11, settled: input syntax. Every plain argument is an input, its type recognized: an IP or CIDR
-  range is a target; =-= reads an IP list from stdin; anything else must be a file, read as nmap or
-  masscan XML when its first 4 KB hold =<!DOCTYPE nmaprun= or =<nmaprun= (nmap writes the DOCTYPE
-  right after the XML declaration, then a comment holding its full command line, which can push
-  =<nmaprun= itself past 4 KB; masscan writes =<nmaprun= without a DOCTYPE), otherwise as an IP
-  list. A CIDR range expands to every address it contains, network and broadcast addresses included
-  (like nmap), IPv6 too. Any mix and shell patterns work: =ip2fqdn scans/*.xml extra.txt 10.9.9.9=.
-  Stderr states how each file was read (=scans/a.xml: nmap XML, 254 hosts=). A file named like an IP
-  is forced with =./10.0.0.1=. Input errors stop the run before any traffic, exit 2: an argument
-  that is neither an IP, a CIDR range nor an existing file ("not an IP or CIDR range, and no such
-  file"); unreadable file; file over 64 MB that is not nmap or masscan XML. Damaged XML keeps its
-  complete hosts, with a warning. Rejected: nmap-style =-iL= and =--nmap FILE...= (=--nmap= swallows
-  later targets); options for every input type (=-t=, =-i=, =--nmap=).
+  range is a target; =-= reads an IP list from stdin; anything else is a file when it exists
+  (otherwise a host name, D55), read as nmap or masscan XML when its first 4 KB hold =<!DOCTYPE
+  nmaprun= or =<nmaprun= (nmap writes the DOCTYPE right after the XML declaration, then a comment
+  holding its full command line, which can push =<nmaprun= itself past 4 KB; masscan writes
+  =<nmaprun= without a DOCTYPE), otherwise as an IP list. A CIDR range expands to every address it
+  contains, network and broadcast addresses included (like nmap), IPv6 too. Any mix and shell
+  patterns work: =ip2fqdn scans/*.xml extra.txt 10.9.9.9=. Stderr states how each file was read
+  (=scans/a.xml: nmap XML, 254 hosts=). A file named like an IP is forced with =./10.0.0.1=. Input
+  errors stop the run before any traffic, exit 2: an argument that is neither an IP, a CIDR range,
+  an existing file nor a host name ("not an IP, CIDR range or host name, and no such file");
+  unreadable file; file over 64 MB that is not nmap or masscan XML. Damaged XML keeps its complete
+  hosts, with a warning. Rejected: nmap-style =-iL= and =--nmap FILE...= (=--nmap= swallows later
+  targets); options for every input type (=-t=, =-i=, =--nmap=).
 - D12, settled: method selection. =-m LIST= says what runs (default: the =default= preset);
   =--skip LIST= removes methods from it. Lists mix method names and preset names:
   =ip2fqdn -m default,mdns --skip netbios 10.0.1.0/24=. Rejected: one option with =+=/=-=
@@ -350,6 +351,9 @@
     override option (=--allow-public-dns=; one more option, and the operator's naming the server is
     already the trust signal). Accepted risk: =--dns-server 8.8.8.8= with internal addresses sends
     them and the internal names found to that resolver; the note says so, after the fact.
+    Reconsidered on 2026-11-26 and kept: using the =/etc/resolv.conf= servers for internal inputs
+    when =--dns-server= is not given (with a note, =--protected-dns= for the strict rule), the same
+    without well-known public resolvers, and an environment variable holding the servers.
 - D20, settled: zones, second phase, =axfr= and =dns-enum=.
   - Zones: (a) zones named with =--zones LIST=; (b) zones learned during the run: DNS domain and
     forest names reported by =smb= or =http-ntlm=, and the immediate parent domain of every name
@@ -601,8 +605,7 @@
   5. =--parallel N=, default 500 connections overall; at most 10 at once per IP; 50 DNS
      queries at once per server. The open-file limit is raised at start to at least N + 50 per
      DNS server + 100; if it cannot be, N is lowered with a note.
-  6. Progress: one status line refreshed every few seconds when stderr is a terminal; only
-     notes otherwise.
+  6. Progress: see D57.
   7. Exit codes: 0 completed (even with no names, and when a quota stop left IPs for a later
      run, which stderr says), 1 fatal error, 2 wrong usage, 130 interrupted by Ctrl-C, 143 by
      SIGTERM.
@@ -711,21 +714,21 @@
   VirusTotal: first page only, 40 resolutions; urlscan: first page only, 100 results; mnemonic:
   =limit=1000=; Shodan range search: at most 100 pages per /24.
 - D45, settled: third-party errors. A request with no HTTP answer (connection error, timeout) is not
-  retried and counts toward D17's five failures in a row. HTTP 401 or 403 from a service switches
-  its method off for the run (key refused). Waits use =Retry-After=, or urlscan's
-  =X-Rate-Limit-Reset-After=. Onyphe error 1005 ("no more credits") is a quota-spent reply.
-  VirusTotal's HTTP 429: one 60 s wait instead of 5, 10 then 20 s (it uses one retry); a second 429
-  is the quota-spent reply of D16. The 30 s read limit of D17 is a limit per wait for data (socket
-  timeout), not for the whole response. Trial requests (D24: Shodan batch lookup, count and range
-  search, Onyphe bulk request) answered with any HTTP status other than 200, 401 and 403 included,
-  turn that capability off for the run (debug line =batch lookups refused=, =counts refused=, =range
-  searches refused=, =bulk requests refused=) and the module falls back to per-IP requests; only a
-  per-IP request answered 401 or 403 switches the method off. Reason: the error a plan without the
-  capability returns is not documented and may be 401 or 403. A range search with no HTTP answer
-  falls back to lookups for that /24 only. Onyphe's error 3 ("Invalid API key format", sent with
-  HTTP 400, seen on a live run, Sources) switches the method off at once, like 401 and 403, on the
-  bulk and the per-IP paths; other Onyphe errors are counted with their number in the summary (=HTTP
-  400, Onyphe error 1011: 2=).
+  retried (the code retried it up to 3 times until 2026-11-26) and counts toward D17's five failures
+  in a row. HTTP 401 or 403 from a service switches its method off for the run (key refused). Waits
+  use =Retry-After=, or urlscan's =X-Rate-Limit-Reset-After=. Onyphe error 1005 ("no more credits")
+  is a quota-spent reply. VirusTotal's HTTP 429: one 60 s wait instead of 5, 10 then 20 s (it uses
+  one retry); a second 429 is the quota-spent reply of D16. The 30 s read limit of D17 is a limit
+  per wait for data (socket timeout), not for the whole response. Trial requests (D24: Shodan batch
+  lookup, count and range search, Onyphe bulk request) answered with any HTTP status other than 200,
+  401 and 403 included, turn that capability off for the run (debug line =batch lookups refused=,
+  =counts refused=, =range searches refused=, =bulk requests refused=) and the module falls back to
+  per-IP requests; only a per-IP request answered 401 or 403 switches the method off. Reason: the
+  error a plan without the capability returns is not documented and may be 401 or 403. A range
+  search with no HTTP answer falls back to lookups for that /24 only. Onyphe's error 3 ("Invalid API
+  key format", sent with HTTP 400, seen on a live run, Sources) switches the method off at once,
+  like 401 and 403, on the bulk and the per-IP paths; other Onyphe errors are counted with their
+  number in the summary (=HTTP 400, Onyphe error 1011: 2=).
 - D46, settled: Shodan fields. Host names from =hostnames= (host and banners), dated
   =last_update= or the banner =timestamp=; certificate names from =ssl.chain[0]= (PEM, read
   with =cryptography=), else =ssl.cert.subject.CN=; =domains= not used (registered domains,
@@ -734,11 +737,14 @@
   network address; Shodan receives only the =net:= query. IPs
   missing from a batch answer are cached as answered without data.
 - D47, settled: Onyphe fields =hostname=, =reverse=, =forward=, =subject.commonname=,
-  =subject.altname=, dated =@timestamp=, else =seen_date=. =domain= not used: it is the
-  registered domain extracted from a host name or certificate, not a name of the host (same
-  reason as Shodan's =domains=, D46); a registered domain that does name the host also comes in
-  =hostname=, =forward= or =reverse=. D24's table no longer lists domains for Onyphe. Rejected:
-  a row for =domain= (usually =dns= =other=, misleading when that column is not read).
+  =subject.altname=; a document's =ip= is a string or a list (seen on a live run, Sources) and its
+  names go to each listed IP it holds; any other =ip= type, and unreadable lines, are skipped; a
+  debug line =bulk lines= gives the line count, the lines whose =ip= is a list and the count per
+  =@category=. Dated =@timestamp=, else =seen_date=. =domain= not used: it is the registered domain
+  extracted from a host name or certificate, not a name of the host (same reason as Shodan's
+  =domains=, D46); a registered domain that does name the host also comes in =hostname=, =forward=
+  or =reverse=. D24's table no longer lists domains for Onyphe. Rejected: a row for =domain=
+  (usually =dns= =other=, misleading when that column is not read).
 - D48, settled: OTX pacing one request every 3.6 s without a key, 0.36 s with one (D24's
   10,000/h); urlscan stays at 36 s with a key (D16): its per-minute and per-hour limits with a
   free key are not documented (only 1,000 a day), to check on the first live run.
@@ -762,24 +768,83 @@
   scheduling, checks), =context.py= (per-method context, limits), =results.py=, =output.py=,
   =inputs.py=, =nmapxml.py=, =names.py= (host-name check, labels), =addresses.py= (public rule),
   =dnsclient.py= (servers, protected rule, queries, transfers), =apiclient.py= (the shared
-  third-party HTTP function), =apihelp.py=, =apicache.py=, =ranges.py=, =aio.py=, =common.py=
-  (masking, log, times); =proto/ntlm.py=, =proto/certs.py= (certificate names), =proto/net.py=
-  (connections, TLS context), =proto/http.py=; D15's =proto/tls.py= became =certs.py= and =net.py=.
-  Tests: =tests/guard.py= (D29 guard, also loaded by =tests/sitecustomize/= in subprocesses),
-  =tests/fakes.py= (fake network thread, certificates, fake DNS with transfers); =tests/data/= holds
-  only the fixtures the tests load (the other API examples and nmap fixtures stay in
-  =/work/ip2fqdn-sources/=). Operator files: =README.md= (usage) and =LIVE-TESTS.md= (the first live
-  runs, what to send back, and the points inferred from documentation that they check). =.gitignore=
-  leaves out =.venv/=, caches and =ip2fqdn/data/= (downloaded ranges).
+  third-party HTTP function), =apihelp.py=, =apicache.py=, =merge.py= (D56), =ranges.py=, =aio.py=,
+  =common.py= (masking, log, times); =proto/ntlm.py=, =proto/certs.py= (certificate names),
+  =proto/net.py= (connections, TLS context), =proto/http.py=; D15's =proto/tls.py= became =certs.py=
+  and =net.py=. Tests: =tests/guard.py= (D29 guard, also loaded by =tests/sitecustomize/= in
+  subprocesses), =tests/fakes.py= (fake network thread, certificates, fake DNS with transfers);
+  =tests/data/= holds only the fixtures the tests load (the other API examples and nmap fixtures
+  stay in =/work/ip2fqdn-sources/=). Operator files: =README.md= (usage) and =LIVE-TESTS.md= (the
+  first live runs, what to send back, and the points inferred from documentation that they check).
+  =.gitignore= leaves out =.venv/=, caches and =ip2fqdn/data/= (downloaded ranges).
 - D53, settled: in IP list files, =#= starts a comment that runs to the end of the line
   (=10.0.0.1 # web= gives 10.0.0.1).
 - D54, settled: over a read limit (D16), HTTP header lines past 64 KB or 100 fields are not
   read and the names from the lines already read are kept (debug line); an SMB reply over 64 KB
   is dropped and counted as an error (warning, D37); a NetBIOS or mDNS datagram cannot exceed
   64 KB.
+- D55, settled (operator, 2026-11-26): host names as input. A command-line argument that is not an
+  IP, a CIDR range, =-= or an existing file, or an IP list line that is not an IP or a CIDR range,
+  is a name input when it is a host name with at least one dot (kinds =dotted= and =local=: AD
+  domains often end in =.local=; no wildcard; no single label, since the tool asks DNS servers
+  directly, with no search domain). Before phase 1, each name is resolved (A and AAAA, CNAMEs
+  followed) by every server named with =--dns-server=, and its addresses join the IP list: they
+  count toward =--max-ips= (over it, exit 2 once the names are resolved) and an internal one is
+  handled like an internal IP input (no third-party service; the public-server note of D19). Only
+  named servers resolve names, because the tool cannot tell an internal name
+  (=srv01.corp.client.fr=) from a public one (=www.client.fr=) before asking (D19). Without
+  =--dns-server= (or with only =/etc/resolv.conf= servers), the names are not resolved and a warning
+  names them and says what to add (=--dns-server missing: N host names in the input not resolved
+  (NAMES); host names are resolved only by servers given with --dns-server, such as the client's DNS
+  server or 1.1.1.1 for public names=); the warning is printed at the start and again after the
+  summary, so a long run does not hide it; when the input holds nothing else, it is an error (exit
+  2). Rows: source =input=, detail =A @SERVER= (with =, CNAME TARGET= when CNAMEs were followed);
+  every CNAME target followed gets its own row (=CNAME of NAME, A @SERVER=). Input names are then
+  handled like names found by the quick methods: forward confirmation, SNI check, parent domain as
+  zone candidate (D20). A name with no address gets a warning (=FILE:LINE: NAME: no address=; for a
+  command-line argument, =ARG: no such file, and no address as a host name=, so a mistyped file name
+  stays visible; a missing file whose name ends in =.txt=, =.lst=, =.xml=, =.csv=, =.tsv=, =.json=,
+  =.nmap= or =.gnmap= stays an input error, =no such file=, exit 2, never a host name); the summary
+  gives =input: N host names, M addresses, K without address=. nmap files are unchanged (names typed
+  as nmap targets are already read, D22). Rejected: names resolved through =/etc/resolv.conf= when
+  no server is named (an internal name typed on a hotel network would go to the hotel's resolver,
+  and a name resolving to an internal address would leave before the protected rule could apply); a
+  list of internal suffixes (misses internal names under public domains, the common AD case).
+- D56, settled (operator, 2026-11-26): =--merge-results= (needs =-o FILE=). When FILE exists, its
+  rows are read before any traffic and the new rows are merged into them; when it does not, the run
+  writes it as usual (note =FILE: new file=). Two rows are the same when =ip=, =fqdn= and =source=
+  match: =detail= takes the union of its places (earlier ones first), =first_seen= the earliest and
+  =last_seen= the latest date (a date that does not parse, e.g. after a spreadsheet round trip,
+  gives way to one that does), =dns=, =sni=, =labels= and =name_kind= the new value unless it is
+  empty (a run without the check does not erase an earlier result). Rows found only in FILE are kept
+  whatever the current input; an IP's row without a name is dropped once the IP has a named row.
+  FILE must start with the tool's header and hold an IP in every =ip= cell; otherwise exit 2 before
+  any traffic, FILE left as it is (=FILE: not an ip2fqdn CSV (header differs), not merged=;
+  =FILE:LINE: not an IP in column ip, not merged=). Summary note: =FILE: N rows before, M after
+  merge=. The CSV is written to =FILE.tmp= and then renamed over FILE, with or without the option,
+  so an interrupted write never leaves half a file. Without the option FILE is replaced, as before.
+  Rejected: merging by default (results of an earlier client would stay in a reused file name).
+- D57, settled (operator, 2026-11-26): progress, the wget pattern. Common tools: git, apt and cargo
+  show progress only on a terminal; wget switches by itself to plain lines when its output is not a
+  terminal; nmap prints a plain line with =--stats-every=. On a terminal, one line is redrawn every
+  second and cut to the terminal width: elapsed time, names found, then each method still running
+  with its count done/total, and =checks= while forward confirmations are pending (=ip2fqdn 3:10  52
+  names  tls 254/1270  onyphe 0/61 (no progress for 72 s)  checks 12/20=). When stderr is not a
+  terminal, the same text comes as a plain line every 60 s (=progress 3:10  52 names ...=): a run
+  whose stderr goes to a file can be followed with =tail -f=, and the file keeps a timeline. Units:
+  IP and port pairs for probes; IP and server pairs for =ptr=; IPs for =nmap-names=; public IPs for
+  third-party services, those answered from the API cache counted as done; zone and server pairs for
+  =axfr=; queries for =dns-enum=; names for =input= (D55), =sni= (the total grows as names arrive)
+  and =checks=. A method with nothing done for 10 s or more gets =(no progress for N s)=. A probe
+  method appears once its first task starts; a method leaves the line when it ends. No single bar or
+  percentage: methods run at very different speeds (a /24 of probes in seconds, urlscan one search
+  every 36 s), so one figure would mislead. Rejected: drawing the line on =/dev/tty= when stderr is
+  redirected (common tools use the terminal that way for password prompts, not for progress); a
+  =--log FILE= option keeping stderr on the terminal (one more option, and a rule for where debug
+  lines go).
 - Status 2026-11-26: steps 1 to 5 done, step 7 done up to delivery (usage notes and this document):
   the 20 methods and the core are built in =/work/ip2fqdn/= (command declared in =pyproject.toml=,
-  D30), 180 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
+  D30), 201 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
   masked values, and the usage notes are in =README.md=. The shared-range download was not run: it
   is left to the operator, and the =ranges= code is tested on copies of the documentation samples
   (=tests/data/cloudflare-ips-v4.txt=, =cloudflare-ips-v6.txt=, =aws-ip-ranges-excerpt.json=). Step
@@ -788,10 +853,12 @@
   two renamed; =setup.sh= and =bin/ip2fqdn= replaced by README install steps and an entry point (D4,
   D30). Project made ready for git: =.gitignore=, no absolute path left in the project files, caches
   and unused fixtures removed, live runs in =LIVE-TESTS.md=, this document moved to the project
-  root. Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule, Onyphe error 1005; D16,
-  D45) has no test. Next: the operator installs and runs the tool on real data as =LIVE-TESTS.md=
-  describes and shares what it lists (rest of step 7); each real-data fact becomes a test fixture
-  and a dated entry under Sources before the code is fixed.
+  root. Live runs so far: Onyphe works (bulk reader fixed for =ip= lists, D47); Shodan next. Host
+  names as input added (D55, live run 9 in =LIVE-TESTS.md=); =--merge-results= added (D56);
+  per-method progress (D57). Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule,
+  Onyphe error 1005; D16, D45) has no test. Next: the operator installs and runs the tool on real
+  data as =LIVE-TESTS.md= describes and shares what it lists (rest of step 7); each real-data fact
+  becomes a test fixture and a dated entry under Sources before the code is fixed.
 
 * Out of scope
 - Being run against real targets by the coding agent, or living in =pentest-tools= (D1, D2).
@@ -845,6 +912,13 @@ facts the decisions rely on, with their URLs and dates.
 - 2026-11-26, internal run with another named server (private address): =DNS server <address>: 20
   queries in a row unanswered, dropped for the run=. Cause not known yet (unreachable from the
   operator's segment, or silent drops under the 50 queries at once per server, D28).
+- 2026-11-26, =-m onyphe= with a valid key, same list: the bulk request was accepted (this
+  licence includes it) and answered 8.9 MB of NDJSON for 61 IPs in 72 s (about 146 KB per IP, so
+  a 100-IP request stays under the 32 MB cap unless a few IPs carry much more). The reader
+  crashed (=TypeError=: unhashable =list=): at least one line's =ip= field was a list. Which
+  categories carry lists, and what a list means, is inferred (each listed address shares the
+  document's names); the =bulk lines= debug line of the next run gives the counts.
+- 2026-11-26, same run after the fix: works (operator's report; no counts sent back).
 
 ** Methods that query the IP (traffic to the target)
 - TLS certificate without SNI (the server sends its default certificate): CN and SAN names.

@@ -59,7 +59,9 @@ async def lookup_all(ips, ctx):
     wanted = set(ips)
     jobs = [(zone, query, server) for zone, _ in ctx.zones for query in queries(zone)
             for server in ctx.dns.active()]
+    ctx.set_total(len(jobs))
     async for result in aio.stream(jobs, lambda job: _query(job, wanted, ctx), WORKERS):
+        ctx.advance()
         if isinstance(result, Exception):
             ctx.failure(result)
             continue
