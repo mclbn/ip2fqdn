@@ -329,21 +329,27 @@
   - Backlog: DNS over HTTPS or TLS.
   - No DNS server at all (none given and none in =/etc/resolv.conf=): =ptr=, =axfr= and
     =dns-enum= are skipped with a note; the =dns= column stays empty.
-  - Protected rule: DNS queries go only to servers named with =--dns-server=; when the input
-    holds a non-public address (rule in D24), a named server with a public address is dropped
-    too, with a note. The rule applies automatically when any listed address is non-public,
-    and to every input with =--protected-dns=; otherwise normal mode. Without a usable named
-    server, =ptr=, =axfr=, =dns-enum=, zone learning and forward confirmation are skipped;
-    probes and API methods still run, and stderr says what to add (=internal addresses in the
-    input: DNS methods and checks need the client's DNS servers; add --dns-server (resolv.conf
-    lists 10.0.0.10)=). Reason: the tool cannot tell whether a server from =/etc/resolv.conf=
-    (public resolver, systemd-resolved stub, home router, VPN resolver) forwards queries
-    outside the client, and these queries carry internal addresses, names and domains; only
-    servers the operator names are trusted. Exception: zones named with =--zones= also get
-    transfer requests at their own name servers, in every mode (D21); those servers receive
-    only the zone name the operator typed. Rejected: a rule based on server addresses only (misses
-    private-address forwarders); an internal flag carried by every query (more bookkeeping,
-    gain only on mixed lists); an opt-in flag only (forgetting it leaks).
+  - Protected rule: DNS queries go only to servers named with =--dns-server=; when the input holds a
+    non-public address (rule in D24), a named server with a public address is still used, with a
+    note (=internal addresses in the input: DNS server 198.51.100.53 has a public address; it
+    receives the internal addresses and names of this run=). The rule applies automatically when any
+    listed address is non-public, and to every input with =--protected-dns=; otherwise normal mode.
+    Without a usable named server, =ptr=, =axfr=, =dns-enum=, zone learning and forward confirmation
+    are skipped; probes and API methods still run, and stderr says what to add (=internal addresses
+    in the input: DNS methods and checks need the client's DNS servers; add --dns-server
+    (resolv.conf lists 10.0.0.10)=). Reason: the tool cannot tell whether a server from
+    =/etc/resolv.conf= (public resolver, systemd-resolved stub, home router, VPN resolver) forwards
+    queries outside the client, and these queries carry internal addresses, names and domains; only
+    servers the operator names are trusted. Exception: zones named with =--zones= also get transfer
+    requests at their own name servers, in every mode (D21); those servers receive only the zone
+    name the operator typed. Rejected: a rule based on server addresses only (misses private-address
+    forwarders); an internal flag carried by every query (more bookkeeping, gain only on mixed
+    lists); an opt-in flag only (forgetting it leaks). Changed after a live run (2026-11-26,
+    Sources): named servers with a public address were dropped, which blocked a client whose
+    internal DNS servers sit on public address space. Rejected then: keeping the drop with an
+    override option (=--allow-public-dns=; one more option, and the operator's naming the server is
+    already the trust signal). Accepted risk: =--dns-server 8.8.8.8= with internal addresses sends
+    them and the internal names found to that resolver; the note says so, after the fact.
 - D20, settled: zones, second phase, =axfr= and =dns-enum=.
   - Zones: (a) zones named with =--zones LIST=; (b) zones learned during the run: DNS domain and
     forest names reported by =smb= or =http-ntlm=, and the immediate parent domain of every name
@@ -824,9 +830,21 @@ facts the decisions rely on, with their URLs and dates.
   HTTP 400; no row. The same request by hand (=curl=, 8.8.8.8) returned HTTP 400 with
   ={"count":0,"error":3,"myip":...,"status":"nok","text":"Invalid API key format","took":0,
   "total":0}=: Onyphe checks the key's format before anything else and answers a malformed key with
-  HTTP 400 and error 3, not 401 or 403. The key held a =!=. Fixture:
+  HTTP 400 and error 3, not 401 or 403. The value held 21 characters, letters and digits plus one
+  =!=; Onyphe's documentation shows no key format (=YOUR_APIKEY=), and the third-party client
+  Use-Onyphe writes 40-character placeholders (github.com/MS-LUF/Use-Onyphe, Howto.md, checked
+  2026-11-26), so the value was probably not the API key. Fixture:
   =tests/data/onyphe-error-3-live.json= (=myip=, the operator's address, replaced by 192.0.2.1).
   Handling in D45.
+- 2026-11-26, internal run on 7 nmap XML files (87 hosts), =--dns-server= naming a server with a
+  public address: the protected rule dropped it, and =ptr=, =axfr=, =dns-enum= and forward
+  confirmation were skipped. The operator's =/etc/resolv.conf= on the client network lists that
+  server and a second public one: the client's DNS servers probably sit on public address space.
+  D19 changed: named servers are used whatever their address. (Client addresses are not recorded
+  here.)
+- 2026-11-26, internal run with another named server (private address): =DNS server <address>: 20
+  queries in a row unanswered, dropped for the run=. Cause not known yet (unreachable from the
+  operator's segment, or silent drops under the 50 queries at once per server, D28).
 
 ** Methods that query the IP (traffic to the target)
 - TLS certificate without SNI (the server sends its default certificate): CN and SAN names.

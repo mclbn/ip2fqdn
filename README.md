@@ -97,7 +97,9 @@ of each name found, kept when a DNS server returns its SOA.
 
 - Third-party services receive public addresses only; stderr gives the number skipped.
 - Protected DNS rule: when any listed address is not public (or with `--protected-dns`), DNS
-  queries go only to `--dns-server` servers, and public named servers are dropped. Without a
+  queries go only to `--dns-server` servers, never to those of `/etc/resolv.conf`. A named
+  server with a public address is used too, with a note: name only the client's own servers
+  (never a public resolver such as 8.8.8.8) when the input holds internal addresses. Without a
   usable server, `ptr`, `axfr`, `dns-enum`, zone learning and forward confirmation are skipped
   and stderr says what to add.
 - Zones named with `--zones` are also transferred from their own name servers, in every mode;

@@ -289,8 +289,10 @@ def test_dns_server_parsing_and_protected_rule():
     named = dnsclient.parse_servers("10.0.0.10,8.8.8.8")
     resolv = dnsclient.parse_servers("192.168.1.1")
     chosen, protected = dnsclient.choose_servers(named, resolv, True, False, log)
-    assert [s.ip for s in chosen] == ["10.0.0.10"] and protected
-    assert "8.8.8.8 has a public address, not used" in stream.getvalue()
+    assert [s.ip for s in chosen] == ["10.0.0.10", "8.8.8.8"] and protected
+    assert "internal addresses in the input: DNS server 8.8.8.8 has a public address; it " \
+        "receives the internal addresses and names of this run" in stream.getvalue()
+    assert "10.0.0.10 has a public address" not in stream.getvalue()
     chosen, protected = dnsclient.choose_servers([], resolv, True, False, log)
     assert chosen == [] and protected
     chosen, protected = dnsclient.choose_servers([], resolv, False, False, log)

@@ -95,11 +95,11 @@ def choose_servers(named, resolv, has_private, protected_dns, log):
     protected = protected_dns or has_private
     if named:
         if has_private:
-            public = [server for server in named if is_public(server.ip)]
-            for server in public:
-                log.note(f"internal addresses in the input: DNS server {server.label()} "
-                         "has a public address, not used")
-            named = [server for server in named if not is_public(server.ip)]
+            for server in named:
+                if is_public(server.ip):
+                    log.note(f"internal addresses in the input: DNS server {server.label()} "
+                             "has a public address; it receives the internal addresses and "
+                             "names of this run")
         servers = named
     elif protected:
         servers = []
