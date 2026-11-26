@@ -1,0 +1,1029 @@
+#+TITLE: ip2fqdn: reference document
+
+* Goal and constraints
+- Python command-line tool: from a list of IP addresses, possibly large, find the related FQDNs.
+  Output: a CSV file with at least =ip,fqdn,source=.
+- Works on internal networks and on Internet-facing assets. Fast (an aim, not a measured target: the
+  quick methods should finish in minutes). Shodan and Onyphe API keys may be absent (their methods
+  are off by default). A DNS server to query is sometimes available, sometimes not.
+- Client: the organization whose network or assets are assessed; the operator runs the tool for it.
+- Scope: the tool resolves IPs to names, nothing more. Features are suggested only when they
+  serve that purpose; no side features (cost or credit reporting, usage estimates, API usage
+  monitoring).
+- Methods are the core of the tool: as many as reasonable, each enabled or disabled from the
+  command line (no configuration file), with a sensible default set. Modular code is required:
+  adding a method must be easy.
+- Confidentiality: internal data (non-public addresses, names and domains learned from them)
+  never reaches a third party: third-party services receive public addresses only (D24); DNS
+  queries about internal data go only to servers the operator names (D19); the one exception is
+  a transfer request for a zone the operator names with =--zones=, which also goes to that
+  zone's own name servers and carries only the zone name (D21).
+- Self-contained: no import from =pentest-tools= or any other private code (what is reused is
+  copied into the project); any public PyPI package may be used (D4 lists the current ones).
+- Separate from =pentest-tools= (=/work/pentest-tools.org=): this tool sends traffic to targets
+  and to third parties, which that toolbox forbids. Only the operator runs it against real
+  targets and third-party services, from a machine with network access; the coding agent runs
+  it only in tests, against fake servers on the loopback interface.
+
+* Environment
+- Operator's machine: full Internet access when installing and preparing the environment.
+- At run time on internal networks, Internet and cloud services may be unreachable: the tool
+  must work with no Internet, using only what the network offers.
+- Assumed until corrected: Linux, on the operator's own machine (no jump hosts).
+- The operator uses mise for tool versions; uv is acceptable. mise may install uv itself
+  (=uv = "latest"= under =[tools]=); the project does not depend on mise.
+
+* Working method
+- Principle (same as =pentest-tools=): a simple, robust and extensible tool beats one with many
+  rarely used features. Smallest useful shape first; extras go to the backlog until a real need
+  shows up. Robustness (damaged, hostile, very large input; bounded memory) is never optional.
+- Steps:
+  1. Design questions, one at a time.
+  2. Shape restated: the agent restates the settled design in the conversation, its own
+     fill-ins listed apart; the user validates it before any code, and the validated fill-ins
+     are written into this document.
+  3. Sources read first (API documentation, protocol specifications, source code of the
+     programs writing a format): each one a module relies on is read and listed under Sources
+     with the date checked. Open lists (Exchange paths for =http-ntlm=, service records for
+     =dns-enum=, =placeholder= names) are fixed from them, written here, reviewed at step 6.
+  4. Tests, then the tool.
+  5. Checks: tests pass, =ruff= clean.
+  6. Implementation review: what was decided while coding is listed in this document, for the
+     user's approval.
+  7. Delivery: usage notes in =README.md= and this document updated; then the
+     operator runs it on real data and shares the results.
+- Process details not listed here are decided when they come up: the agent settles minor ones and
+  records them here, and asks the user about those that are hard to undo or change the direction of
+  the work. The agent writes all the code (core, method modules, tests) itself, in sequence; no
+  sub-agents (budget constraint).
+- Steps 4 to 7 run in one session without stopping for questions: choices made while coding are
+  taken by the agent and recorded in this document (step 6); they are presented to the user at
+  the end of the session, after delivery.
+
+* Decisions
+- D1, settled: separate project in =/work/ip2fqdn/= on the development machine, with this document
+  at its root (=ip2fqdn.org=, so the git repository carries it). The conventions of =pentest-tools=
+  reused are only those this document states: uv project (D4), times in the local zone with offset
+  (D26), debug masking (D28), XML entity declarations refused and control characters escaped (D26,
+  Sources), test guard (D29). Rejected: a new tool inside =pentest-tools= (would break its
+  no-network, no-target and standard-library-only rules, and its test guard).
+- D2, settled: the operator runs the tool from a machine with network access.
+- D3, settled: no external programs (nmap, dnsx, tlsx...); Python code only: libraries where
+  they fit, own code otherwise.
+- D4, settled: a uv project like =pentest-tools=: =pyproject.toml=, locked dependencies, Python 3.14
+  from uv only (=python-preference = "only-managed"= in =pyproject.toml=: in the step-3 experiments
+  uv fell back to the system Python, and uv's own build is the one tested with TLS 1.0 servers,
+  Sources); =uv sync= downloads it into uv's shared folder (=~/.local/share/uv/python=). Install,
+  once with Internet, offline afterwards (README): =uv sync --locked=, then =uv run python -m
+  ip2fqdn.ranges= (D25); the =ip2fqdn= command is declared in =pyproject.toml= (D30). Rejected at
+  step 6: the =setup.sh= of =pentest-tools= (it also kept Python inside the project folder; two
+  README commands do the same job), and a shell launcher that finds =.venv/= next to itself (not the
+  standard Python way). Code layout in D15 (the initial "one =.py= file" was replaced by a package).
+  Dependencies: any public PyPI package. Current: =dnspython= (queries to a chosen DNS server, PTR,
+  DNS message parsing), =cryptography= (certificate parsing); tests: =pytest=, =hypothesis=; lint:
+  =ruff=. NTLM parsing and API calls with the standard library. Rejected: one file with inline
+  dependencies run by =uv run= (offline runs depend on uv's cache); one standard-library-only file
+  (own DNS client and certificate parser to write and harden against hostile servers). No
+  =mise.toml= in the project.
+- D5, settled: scale. Common lists: 100 to a few thousand IPs (several /24); rare maximum about
+  10,000. All results fit in memory (a few MB). Third-party services are the slow part: about 1 IP/s
+  for Shodan and Onyphe (10,000 IPs: about 2 h 45), down to 500 IPs a day for some free ones (D24);
+  the API answer cache (D27) spreads them over days. Methods that query the IP should finish in
+  minutes. Acceptable run times not stated by the operator.
+- D6, settled: every source (methods that query the IP, DNS, nmap files, third-party) is a method
+  module switched on or off from the command line. Default rule: a method is on by default when it
+  works across routers, needs no credential, API key or third party, and returns a name for the host
+  itself.
+- D7, settled: methods that query the IP. Module names reviewed at step 6 and kept.
+  | Module      | Sends                                                  | State     |
+  |-------------+--------------------------------------------------------+-----------|
+  | =tls=       | TLS without SNI on 443, 8443, 9443, 636, 465, 993,     | on        |
+  |             | 995, 5986: certificate CN and SAN                      |           |
+  | =rdp=       | 3389: RDP greeting, then TLS; certificate name         | on        |
+  | =smb=       | 445: SMB2 and first NTLM step, never completed;        | on        |
+  |             | DNS name, DNS domain, NetBIOS name                     |           |
+  | =netbios=   | UDP 137 node status: computer name, domain, MAC        | on        |
+  | =smtp=      | 25, 587: greeting, EHLO, STARTTLS certificate          | on        |
+  | =http=      | 80, 8080: =GET /=, host name in a redirect             | on        |
+  | =http-ntlm= | first NTLM step on 5985 and 5986 =/wsman=, and         | on        |
+  |             | Exchange paths on 443 (=/EWS/=, =/Autodiscover/=...)   |           |
+  | =mdns=      | UDP 5353 reverse query to every IP: =host.local=;      | off       |
+  |             | only hosts on the operator's own segment answer        |           |
+  Module behavior: =smb= speaks SMB2/3 only (dialects 2.0.2 to 3.1.1); SMB1-only hosts give
+  nothing (SMB1 to the backlog). NTLM steps (=smb=, =http-ntlm=): DNS domain and forest names
+  feed zone learning (D20); rows per finding in D26. =smtp=: EHLO with the local address of the
+  connection in brackets (=EHLO [10.1.2.3]=, =EHLO [IPv6:2001:db8::1]=); the name is the first
+  word after the reply code (RFC 5321 section 4.3.1), in the greeting and in the first EHLO
+  line; STARTTLS when offered; =QUIT=.
+  =http= and =http-ntlm=: TLS on 443, 8443, 5986 and ports nmap reports as TLS, plain HTTP
+  elsewhere; Host header = the IP; User-Agent =Mozilla/5.0 (compatible; ip2fqdn)=. =http= keeps
+  the host of a 3xx =Location= when it is a name. =http-ntlm= (default ports 5985, 5986 and
+  443): =/wsman= only on 5985 and 5986; on any other port, TLS or plain, the paths =/EWS/=,
+  =/Autodiscover/Autodiscover.xml=, =/mapi/=, =/OAB/=, =/Rpc/=
+  and last =/=, tried in that order (grounded in Exchange's default virtual-directory
+  authentication, checked 2026-11-24; =/owa/=, =/ecp/=, =/Microsoft-Server-ActiveSync/=,
+  =/PowerShell/= left out: forms, Basic or Kerberos by default, so no NTLM challenge); it
+  stops at the first path that returns a challenge on a port.
+  Certificate names (=tls=, =rdp=, =smtp= after STARTTLS, =sni=): read with =cryptography=,
+  taking whatever it can read: the CN when the SAN extension fails, the SAN names when the
+  subject fails; a certificate that does not load gives no name and is counted per method in
+  the stderr summary (=certificates unreadable: N=). Rejected for now: an own DER reader as
+  fallback (one more hostile-input parser for a case of unknown frequency; backlog until live
+  runs show the count matters).
+  Backlog: =ftp=, =imap=, =pop3= (banner, STARTTLS); =ldap= (anonymous rootDSE); =rdp-ntlm=
+  (CredSSP); =mssql= (NTLM); =dns-chaos= (=hostname.bind=, =id.server=); =snmp= (=sysName=,
+  community string needed); =llmnr= (reverse query; whether hosts answer is unverified).
+  Rejected: =ssh=, =vnc= and other services whose banners hold no names.
+  Estimate, not measured: about 19 connection attempts per IP; 5,000 IPs with 500 in
+  parallel and the 3 s connect timeout (D17) take about 9.5 minutes in the worst case.
+- D8, settled: nmap XML scan results (and masscan XML, D28) accepted as input, several files
+  at once (=scans/*.xml= expanded by the shell). Parsing code from =pentest-tools= (its
+  =nmap_report= tool) copied into the project, never imported, and extended: its parser drops
+  the =scaninfo= scanned ranges, which D9 needs (the =extraports= port lists are not needed,
+  D9); format notes copied under Sources.
+- D9, settled: port selection.
+  - Without nmap input: each module probes its default ports; an option adds or replaces
+    ports (syntax in D13). Default lists stay short: each extra default port costs one
+    attempt per IP.
+  - With nmap input: a port is skipped when the scan covered it (scanned ranges in =scaninfo=), the
+    host has port results (a =<ports>= element) and the port is not listed =open= or
+    =open|filtered=. nmap accounts for every scanned port, either listed or counted in
+    =<extraports>=, so such a port was found closed or filtered; the =extraports= port lists are not
+    read. A host without port results (ping scan, host timeout) has its ports probed as usual.
+    =open= and =open|filtered= ports are probed, and ports outside the scanned ranges are probed as
+    usual (for example UDP 137 after a TCP-only scan). With =-sV=, each module also takes open ports
+    whose nmap service name is in its declared =nmap_services= list (=http= on 8000, =smtp= on
+    2525); ports nmap reports as TLS-wrapped also go to =tls=. =tls= also tries every open TCP port
+    that no selected module takes (by default port, option or service name), so HTTPS on any port is
+    found without relying on service names. Several files holding one host are merged: its open
+    ports and scanned ranges are the union over the files that hold it; it counts as down only if
+    every file that holds it reports it down. Hosts reported down are skipped by methods that query
+    the IP; DNS and third-party methods still run for them.
+  - Rejected: probing only open ports (a TCP-only scan would silently disable =netbios=);
+    nmap files as a plain IP list (misses non-standard ports).
+- D10, settled: input types: IPs and CIDR ranges on the command line; IP list files, or =-=
+  for stdin; nmap or masscan XML files. DNS zone files: backlog (D25).
+- D11, settled: input syntax. Every plain argument is an input, its type recognized: an IP or CIDR
+  range is a target; =-= reads an IP list from stdin; anything else must be a file, read as nmap or
+  masscan XML when its first 4 KB hold =<!DOCTYPE nmaprun= or =<nmaprun= (nmap writes the DOCTYPE
+  right after the XML declaration, then a comment holding its full command line, which can push
+  =<nmaprun= itself past 4 KB; masscan writes =<nmaprun= without a DOCTYPE), otherwise as an IP
+  list. A CIDR range expands to every address it contains, network and broadcast addresses included
+  (like nmap), IPv6 too. Any mix and shell patterns work: =ip2fqdn scans/*.xml extra.txt 10.9.9.9=.
+  Stderr states how each file was read (=scans/a.xml: nmap XML, 254 hosts=). A file named like an IP
+  is forced with =./10.0.0.1=. Input errors stop the run before any traffic, exit 2: an argument
+  that is neither an IP, a CIDR range nor an existing file ("not an IP or CIDR range, and no such
+  file"); unreadable file; file over 64 MB that is not nmap or masscan XML. Damaged XML keeps its
+  complete hosts, with a warning. Rejected: nmap-style =-iL= and =--nmap FILE...= (=--nmap= swallows
+  later targets); options for every input type (=-t=, =-i=, =--nmap=).
+- D12, settled: method selection. =-m LIST= says what runs (default: the =default= preset);
+  =--skip LIST= removes methods from it. Lists mix method names and preset names:
+  =ip2fqdn -m default,mdns --skip netbios 10.0.1.0/24=. Rejected: one option with =+=/=-=
+  signs (the option parser reads =-m -netbios= as two options); one flag per method.
+- D13, settled with D12 (option names reviewed at step 6): =--list-methods= prints one line per
+  method: name, on/off state, kind, phase, presets, needs (API key variable, DNS server) and
+  ports. Options: =-m/--methods=, =--skip=, =-o/--output=, =--dns-server=, =--protected-dns=
+  (D19), =--zones=, =--no-forward-confirm= (D19), =--parallel=, =--connect-timeout=,
+  =--timeout=, =--max-ips=, =--max-zones=, =--debug=, =--list-methods=, =--version=,
+  =--shodan-search=; generated for every
+  module: =--<method>-timeout= and, for every method that probes ports of the listed IPs (=smb=,
+  =netbios=, =rdp=, =mdns= included; not =sni=, which uses the ports where =tls= answered),
+  =--<method>-ports= (the test fakes need ports 1024 and above, D29). Per-module options are
+  prefixed with the module name and grouped by module in =--help= (=--tls-ports=,
+  =--smtp-ports=...); a list may include the word =default= (=--tls-ports default,10443= adds,
+  =--tls-ports 10443= replaces). API keys only from environment variables (listed in D24), never
+  from the command line. API base addresses can be overridden with =IP2FQDN_<METHOD>_URL= variables
+  (not shown in =--help=; for the test fakes). A method named explicitly whose key is missing stops
+  the run before any traffic, exit 2; the same method pulled in by a preset is skipped with a note
+  on stderr. Renamed at step 6: =--paranoid= became =--protected-dns= (in nmap, "paranoid" is
+  the slowest timing mode) and =--no-confirm= became =--no-forward-confirm= (elsewhere "no
+  confirm" means "do not ask before acting"); both new names match the terms of the README
+  and the stderr notes.
+- D14, settled: presets, usable in =-m= and =--skip=. Each module declares the presets it
+  belongs to, so a new module joins them with no other change.
+  | Preset    | Meaning                                  | Members                             |
+  |-----------+------------------------------------------+-------------------------------------|
+  | =default= | runs when =-m= is not given; needs no    | =tls=, =rdp=, =smb=, =netbios=,     |
+  |           | Internet access (local network only)     | =smtp=, =http=, =http-ntlm=, =ptr=, |
+  |           |                                          | =axfr=, =dns-enum=, =nmap-names=,   |
+  |           |                                          | =sni=                               |
+  | =all=     | every implemented method                 |                                     |
+  | =active=  | sends traffic to the listed IPs          | =default= active members, =mdns=;   |
+  |           |                                          | later: D7 backlog methods           |
+  | =dns=     | queries DNS servers only                 | =ptr=, =axfr=, =dns-enum=           |
+  | =api=     | calls third-party Internet services      | =shodan=, =onyphe=, =internetdb=,   |
+  |           |                                          | =otx=, =virustotal=, =urlscan=,     |
+  |           |                                          | =mnemonic=                          |
+  | =free=    | third-party services needing no payment  | =internetdb=, =otx=, =virustotal=,  |
+  |           |                                          | =urlscan=, =mnemonic=               |
+  | =passive= | sends nothing to the listed IPs and      | =dns= except =axfr=, =api=,         |
+  |           | nothing the target logs as hostile       | =nmap-names=                        |
+  | =windows= | names from Windows protocols             | =smb=, =rdp=, =netbios=,            |
+  |           |                                          | =http-ntlm=; later: =ldap=,         |
+  |           |                                          | =rdp-ntlm=, =mssql=                 |
+  | =cert=    | names from TLS certificates              | =tls=, =rdp=, =smtp=, =sni=; later: |
+  |           |                                          | =ftp=, =imap=, =pop3=               |
+  A =cloud= preset returns with the =aws= and =cloudflare= methods (backlog, D25).
+  Rejected: a =file= preset (local files only; superfluous), an =offline= preset (=default=
+  already needs no Internet).
+- D15, settled: code layout. A package with an explicit list of methods:
+  : /work/ip2fqdn/
+  :   ip2fqdn/
+  :     cli.py inputs.py nmapxml.py runner.py output.py
+  :     ranges.py                               shared-range download (D25)
+  :     data/shared-ranges.txt                  written by ranges.py
+  :     proto/ntlm.py proto/tls.py              shared protocol code
+  :     methods/__init__.py                     METHODS = [tls, rdp, smb, netbios, ...]
+  :     methods/tls.py methods/smb.py methods/netbios.py ...
+  :   tests/
+  :   pyproject.toml uv.lock README.md LIVE-TESTS.md ip2fqdn.org
+  The =ip2fqdn= command is an entry point declared in =pyproject.toml= (D30). Adding a method:
+  one file in =methods/=, one line in =METHODS=, its tests. File names other than =methods/= and
+  =proto/= are provisional.
+  Rejected: one file (several thousand lines); automatic discovery of method files (what
+  runs would depend on the files lying in the folder).
+- D16, settled: concurrency and module contract.
+  - asyncio: modules are =async def=; blocking libraries (=urllib=) run through
+    =asyncio.to_thread=. Tests run with asyncio debug mode on, which reports any step holding
+    the event loop longer than 100 ms (catches blocking calls).
+  - The core reads inputs, applies port selection (D9), enforces limits (connections overall
+    and per IP, per-method =parallel=, queries per DNS server, API pacing, timeouts; D17,
+    D28), turns any error inside a module into a warning (a module never stops the run),
+    passes third-party modules public addresses only (D24), collects findings and writes the
+    output.
+  - API pacing is done by the core only, from the delay each module declares in =rate=: the time
+    between two requests, set from the service's strictest documented limit shorter than a day
+    (urlscan: 100/h, so one request every 36 s; mnemonic: one every 6 s; VirusTotal: one every 15 s;
+    OTX: 1,000/h; Shodan and Onyphe: 1/s). Daily limits are not counted: the service's own
+    quota-spent reply stops the module for the run with a one-line note; its answers stay in the
+    cache (D27). Quota-spent replies: any HTTP 429 asking for a wait of more than an hour, from any
+    service (urlscan gives its reset time); mnemonic's HTTP 402; VirusTotal's HTTP 429
+    =QuotaExceededError= still returned after a 60 s wait (the same code covers its minute and daily
+    quotas; wait and retry details in D45). An HTTP 429 asking for a wait of an hour or less is
+    waited out; without =Retry-After=, waits of 5, 10 then 20 s. InternetDB: declared at 5
+    requests/s, halved on each HTTP 429, never sped up (its documented limit, bursts of up to 10,000
+    requests/s, is far higher, but the service is free and shared and its HTTP 429 behavior is
+    undocumented). Rejected: several windows per service with daily counters (a run cannot see the
+    quota used by earlier runs, so its count is wrong).
+  - Work order for methods called per IP and port (=lookup=): tasks are queued by method, then port,
+    then IP; each free connection slot takes the next task, so a sweep may start before the previous
+    one ends. DNS and third-party modules run alongside (D24, D27).
+  - Read limits: 64 KB of HTTP headers; per SMTP session at most 100 lines of at most 4 KB each
+    (over the limit, the session ends with a warning and names already read are kept); 64 KB
+    per SMB, NetBIOS or mDNS reply, 32 MB per API response (over the limit, the reply is
+    dropped with a warning).
+  - A module declares =name=, =help=, =kind= (=active=, =dns=, =file=, =api=), =presets=,
+    default =ports=, =nmap_services= (nmap service names it takes, D9), =rate= (delay between
+    API requests), =timeout= (when longer than the default, D17), =phase= (1 or 2), optionally
+    =parallel= (cap on its simultaneous calls); implements =lookup(ip, port, ctx)= (once per IP
+    and port, yields findings) or =lookup_all(ips, ctx)= (whole list at once: bulk APIs, zone
+    transfers, nmap names); phase-2 methods read the names found and the TLS ports
+    that answered from =ctx=; optionally =add_arguments()= (own options) and =check()= (key
+    present, before any traffic).
+  - Rejected: threads (a library call ignoring its timeout holds a thread forever; 8 MB of
+    virtual memory reserved per thread by default); mixing async and plain modules.
+- D17, settled: timeouts.
+  - =--connect-timeout S= (default 3): TCP connection, or any reply to a UDP packet; what a
+    dead host or filtered port costs.
+  - =--timeout S= (default 10): total time one module gets for one IP and port; enforced by
+    the core by cancelling the call, so no module can hang. Modules may declare a longer
+    default (=smtp=: 20, for deliberately delayed greetings), which replaces the built-in 10 s;
+    an explicit =--timeout= applies to every module.
+  - =--<module>-timeout S=: per-module override, generated by the core for every module; it
+    wins over both.
+  - Retries: none for TCP (a retry doubles the cost of dead hosts); one for UDP.
+  - DNS: 2 s per attempt, 2 attempts per query; a server with 20 queries in a row unanswered
+    after both attempts is dropped for the run, with a warning.
+  - Third-party APIs: 10 s to connect, 30 s to read per request; on HTTP 429 or 5xx, wait
+    (=Retry-After= if given, otherwise 5, 10 then 20 s) and retry up to 3 times, each wait
+    using one retry; after 5 requests in a row still failing once their retries are used up,
+    the method is switched off for the run, with a warning. Quota-spent replies: D16.
+  - Whole-list methods: no total limit; a connection (zone transfer, bulk download) that
+    receives no data for 60 s is abandoned. Pacing delays and HTTP 429 waits are not idle time.
+  - Blocking libraries in threads must pass their own timeouts (threads cannot be cancelled).
+  - Stderr summary counts timeouts per method.
+  - Rejected: a single =--timeout= (cannot make dead hosts cheap and slow services tolerated
+    at once). Backlog: speed profiles like nmap's =-T=; a dead-host shortcut.
+  - Estimate, not measured: 10,000 dead IPs, 19 attempts each, 3 s, 500 in parallel: about
+    19 minutes. With nmap input, hosts reported down are skipped.
+- D18, settled (principle; per-service details in D24): third-party modules minimize
+  requests and credits. They use =lookup_all= to plan requests: batch or range queries when
+  the service offers them, per-IP lookups otherwise, the choice depending on how dense the IPs
+  are in a range; the same IP is never asked twice in one run.
+- D19, settled: DNS basics.
+  - =ptr=: reverse DNS for every IP, every PTR record kept. On by default (=default=, =dns=,
+    =passive=).
+  - Servers: =--dns-server IP[:PORT][,...]= (port 53 unless given; an IPv6 server with a port
+    in brackets, =[::1]:5353=) if given, otherwise the
+    =nameserver= lines of =/etc/resolv.conf= (normal mode; see the protected rule below). Every
+    query goes to every server; every distinct answer is kept and the output says which server gave
+    it (split views: internal and public answers can both be right). Rejected: failover (misses the
+    second view). Queries therefore go to each server directly: dnspython's =Resolver= fails over to
+    the next server instead of asking every one, so one resolver is built per server.
+  - Forward confirmation: each distinct name found (except wildcards, short and =.local=
+    names) is resolved with the same servers as soon as it is found (D27); result per row:
+    =match= (some server returns the IP among the name's A/AAAA records, CNAMEs followed),
+    =other= (answers exist, none is the IP), =none= (every server says the name does not exist
+    or has no address), =error= (anything else); precedence in that order. On by default;
+    =--no-forward-confirm= switches it off.
+  - Backlog: DNS over HTTPS or TLS.
+  - No DNS server at all (none given and none in =/etc/resolv.conf=): =ptr=, =axfr= and
+    =dns-enum= are skipped with a note; the =dns= column stays empty.
+  - Protected rule: DNS queries go only to servers named with =--dns-server=; when the input
+    holds a non-public address (rule in D24), a named server with a public address is dropped
+    too, with a note. The rule applies automatically when any listed address is non-public,
+    and to every input with =--protected-dns=; otherwise normal mode. Without a usable named
+    server, =ptr=, =axfr=, =dns-enum=, zone learning and forward confirmation are skipped;
+    probes and API methods still run, and stderr says what to add (=internal addresses in the
+    input: DNS methods and checks need the client's DNS servers; add --dns-server (resolv.conf
+    lists 10.0.0.10)=). Reason: the tool cannot tell whether a server from =/etc/resolv.conf=
+    (public resolver, systemd-resolved stub, home router, VPN resolver) forwards queries
+    outside the client, and these queries carry internal addresses, names and domains; only
+    servers the operator names are trusted. Exception: zones named with =--zones= also get
+    transfer requests at their own name servers, in every mode (D21); those servers receive
+    only the zone name the operator typed. Rejected: a rule based on server addresses only (misses
+    private-address forwarders); an internal flag carried by every query (more bookkeeping,
+    gain only on mixed lists); an opt-in flag only (forgetting it leaks).
+- D20, settled: zones, second phase, =axfr= and =dns-enum=.
+  - Zones: (a) zones named with =--zones LIST=; (b) zones learned during the run: DNS domain and
+    forest names reported by =smb= or =http-ntlm=, and the immediate parent domain of every name
+    found by the quick methods (=a.b.example.com= gives =b.example.com=), kept only when a DNS
+    server returns an SOA record for that exact name in the answer section (no public suffix list
+    needed). Reverse zones are not transferred (D21).
+  - Second phase: methods declaring =phase = 2= run once the quick methods are done (D27) and
+    receive the names found; their results do not trigger a third round.
+  - =axfr= (on, =dns= preset; phase 2): see the AXFR rules below. =dns-enum= (on, =dns= and
+    =passive= presets; phase 2): for every zone, NS, MX, SOA, one ANY query on the zone (kept
+    although recent BIND refuses ANY: old and Windows DNS servers, the common internal case, still
+    answer it usefully; a REFUSED or empty ANY answer is normal and does not count toward D17's
+    unanswered-queries rule) and these 12 service records: =_ldap._tcp.dc._msdcs.<zone>=,
+    =_ldap._tcp.<zone>=, =_kerberos._tcp.<zone>=, =_gc._tcp.<zone>= (queried for every zone; Active
+    Directory registers it under the forest root name only), =_vlmcs._tcp.<zone>=,
+    =_autodiscover._tcp.<zone>=, =_sip._tls.<zone>=, =_sipfederationtls._tcp.<zone>=,
+    =_xmpp-server._tcp.<zone>=, =_xmpp-client._tcp.<zone>=, =_submission._tcp.<zone>=,
+    =_imaps._tcp.<zone>=. Left out: records whose targets duplicate these (=_kerberos._udp=,
+    =_kpasswd=, =_ldap._tcp.pdc=, =_ldap._tcp.gc._msdcs=), site records (need site names) and GUID
+    records. SRV targets equal to =.= are ignored. Every host name in the answers (NS and MX hosts,
+    the SOA primary server, SRV targets, names in the ANY answer) is resolved with explicit A and
+    AAAA queries, not the additional section; A and AAAA records in the answers are checked
+    directly; names pointing to a listed IP become findings. Explicit types because RFC 8482 lets
+    servers answer ANY minimally.
+  - DNS servers in use: =--dns-server= if given, otherwise =/etc/resolv.conf= (=search= and =ndots=
+    ignored), within the protected rule (D19). UDP, TCP when truncated, on port 53 unless
+    =--dns-server= gives one; zone transfers over TCP. At most 50 parallel queries per server (D28).
+    Zone transfers are written by hand, not through dnspython: its transfer loop has no size limit
+    and held the event loop up to 0.8 s in the step-3 experiments. A loopback server taken from
+    =/etc/resolv.conf= (systemd-resolved stub 127.0.0.53) is used for ordinary queries but never for
+    zone transfers; a loopback server given with =--dns-server= is used for both.
+  - Cap on learned zones: D28 item 8.
+- D21, settled: AXFR rules (=axfr= runs in phase 2).
+  | Zone                                       | Sent to                                     |
+  |--------------------------------------------+---------------------------------------------|
+  | zones learned during the run (SOA checked) | DNS servers in use                          |
+  | zones named with =--zones=                 | DNS servers in use and the zone's own NS    |
+  A zone's own NS are found with an NS query to the DNS servers in use and their addresses
+  resolved through them; they receive transfer requests in every mode, protected included,
+  because the only data sent is the zone name the operator typed (D19). Rejected: own NS only
+  when their address is private; named servers only in protected mode.
+  Never: when =axfr= is not selected (=--skip axfr=, a =-m= list without it, =-m passive=); to
+  a zone's own name servers unless the operator named the zone; through a loopback server
+  taken from =/etc/resolv.conf= (transfers of learned zones are then skipped with a note
+  suggesting =--dns-server=); for names that are not zones; twice for the same zone and
+  server; for reverse zones (=ptr= already asks every server for the PTR of every listed IP,
+  so a reverse-zone transfer gives the same pairs).
+  =passive= excludes =axfr=: a transfer attempt is logged as hostile and classed as active
+  reconnaissance; =-m passive,axfr= adds it back. Rejected: =passive= strictly "nothing sent
+  to the listed IPs". Backlog: transferring the enclosing reverse zone of each /24, found
+  through its SOA.
+- D22, settled: =nmap-names= (kind =file=, on, =default= and =passive= presets; does nothing without
+  nmap files). Reads =<hostname type="user">= (name typed as scan target), =<hostname type="PTR">=,
+  =<service hostname=...>= (=-sV=), scripts =ssl-cert=, =*-ntlm-info= and =smb-os-discovery=. Exact
+  structures checked against nmap's DTD and script sources at step 3 (2026-11-24, Sources); fixtures
+  built from them (not validated with xmllint), real outputs from the operator's live runs added
+  when shared. Backlog: =nbstat=, =http-title= redirect target,
+  =smtp-commands=, =ldap-rootdse=. Rejected: off by default (staleness is shown by forward
+  confirmation).
+- D23, settled: checks and labels. Labels never remove a row.
+  - Forward confirmation: definitions in D19; with several DNS servers, =match= if any server
+    maps the name to the IP. Rejected: recording which servers did (no column for it).
+  - Name kind (=name_kind= column): =dotted=, =short= (=FS01=), =local= (=.local=),
+    =wildcard= (=*.x=).
+  - =generic=: the name contains all four octets of the IPv4 address, in order or reversed,
+    with or without zero padding, joined by one separator (=-=, =.= or none) used between all
+    four, with no digit just before or after them
+    (=203-0-113-10.static.isp.net=, =ec2-3-4-5-6.compute-1.amazonaws.com=). IPv6 names are
+    never labelled =generic= in the first version.
+  - =placeholder=: names shared by many unrelated devices, so they identify no host;
+    device-unique factory names are not placeholders (they already show as =short=). Matching
+    is case-insensitive on the lowercased name without its trailing dot; a suffix rule matches
+    the name itself and anything ending in =.X=. Suffix: =localhost=, =localdomain=,
+    =invalid=, =example=, =example.com=, =example.net=, =example.org= (not =.test=: real lab
+    domains use it), =routerlogin.net=, =routerlogin.com=, =asusrouter.com=. Exact: the five
+    Kubernetes names (=kubernetes=, =kubernetes.default=, =kubernetes.default.svc=,
+    =kubernetes.default.svc.cluster=, =kubernetes.default.svc.cluster.local=),
+    =pfsense.home.arpa=, =opnsense.internal=, =mikrotik=, =unifi=, =synology=, =synology.com=
+    (the =unifi= and =synology= entries rest on community posts, not vendor documentation).
+    Sources checked 2026-11-24 (RFC 2606, RFC 6761, vendor docs).
+  - Dates: first and last seen as a third-party service gives them; a source giving one date fills
+    both columns with it; =internetdb= (no date) leaves both empty; =nmap-names= uses the host's
+    =starttime=, otherwise the scan's start time; methods that query at run time (probes, =sni=,
+    =ptr=, =axfr=, =dns-enum=) use the time of the finding.
+  - =sni= method (active; presets =default=, =active=, =cert=; phase 2): for every name of
+    kind =dotted= (no =.local=, no wildcards) found by the quick methods, and every later name
+    from API methods as it arrives (D27), except =generic= and =placeholder=, on each
+    port where =tls= completed a direct handshake (not RDP or STARTTLS), connect with the name
+    as SNI and check that the returned certificate lists the name (CN or SAN, wildcards
+    included). No trust-chain or expiry check. Result (=sni= column): =served=,
+    =not-served=, =error=; with several ports, =served= if any port serves the name, otherwise
+    =not-served= if any port answered, otherwise =error=. A certificate with other names adds
+    them as findings (method
+    =sni=), confirmed by DNS but not SNI-checked again. Phase-2 names (=axfr=, =dns-enum=) are
+    not SNI-checked. Estimate, not measured: 9,000 handshakes, worst case about 3 minutes.
+    Rejected: checking only names DNS does not confirm (needs a third stage).
+  - Shared address (IP in a CDN or cloud edge range): =shared= label (D25).
+  - Rejected: a confidence score (hides how it is computed; rows carry the facts).
+  - Backlog: HTTP Host header check for plain-HTTP virtual hosts.
+- D24, settled: third-party services (kind =api=; presets =api= and =passive=, free ones also
+  =free=; all off by default).
+  | Module       | Key (environment variable)    | Gives                         | Limits          |
+  |--------------+-------------------------------+-------------------------------+-----------------|
+  | =shodan=     | required (=SHODAN_API_KEY=)   | host names, certificate       | 1/s             |
+  |              |                               | names, last seen              |                 |
+  | =onyphe=     | required (=ONYPHE_API_KEY=)   | host names, PTR,              | about 1/s       |
+  |              |                               | certificate names, seen dates |                 |
+  | =internetdb= | none                          | host names (PTR, certificates)| 5/s declared    |
+  | =otx=        | optional (=OTX_API_KEY=)      | passive DNS, first/last seen  | 1,000/h, 10,000 |
+  |              |                               |                               | with a key      |
+  | =virustotal= | required, free                | passive DNS                   | 4/min, 500/day  |
+  |              | (=VIRUSTOTAL_API_KEY=)        |                               |                 |
+  | =urlscan=    | optional (=URLSCAN_API_KEY=)  | domains seen on the IP in     | 30/min, 100/h,  |
+  |              |                               | scans, scan date; 30 days     | 500/day; 1,000/ |
+  |              |                               |                               | day with a key  |
+  | =mnemonic=   | none                          | passive DNS, first/last seen  | 10/min, 1,000/  |
+  |              |                               |                               | day             |
+  - Shodan: for each /24 holding at least 2 listed IPs, one =/shodan/host/count= request with =net:=
+    and an =ip= facet (no query credits) lists the IPs Shodan knows; host lookups (no credits) only
+    for those and for IPs alone in their /24; 100 IPs per request if the account accepts it (tried
+    once, then one per request). The facet list is trusted only when its per-IP counts add up to the
+    response's =total= (every banner of the range is accounted for, so IPs missing from the facet
+    list have nothing); otherwise, or on an error, every listed IP of that /24 is looked up. Since
+    2025-11 facet value limits depend on the subscription level (values not published; an over-limit
+    request returns an error). To check on the operator's first live run: the =ip= facet's value
+    format and the counts are inferred, and the test fake's count response is constructed, not taken
+    from documentation. The /24 grouping is for IPv4; each listed IPv6 address gets its own host
+    lookup. =--shodan-search= uses range searches instead for /24 ranges where Shodan knows at least
+    10 IPs (spends query credits); other ranges get lookups.
+  - Onyphe: =/bulk/summary/ip= with the whole list (in requests of 100 IPs, D44); if refused,
+    =/summary/ip/{ip}= one per second. The summary's PTR and passive DNS come from the =resolver=
+    category, included on the Griffin View licence only and silently empty on others: PTR names from
+    Onyphe are a bonus, not a promise (the =ptr= method with the operator's DNS server is the
+    primary source); host names and certificate names are unaffected.
+  - Capabilities (batch lookups, bulk access) are found by trial requests, never by account
+    calls; the operator does not know which plans the keys belong to.
+  - Pacing and quotas: by the core, from each module's declared delay (D16); a module stopped by its
+    quota keeps its results, cached for the next run (D27). Missing optional key: anonymous limits.
+    Missing required key: D13 rules. All selected third-party modules run at the same time; the
+    slowest one sets the length of the run.
+  - Public addresses only, in every mode: third-party modules never receive a non-public address. An
+    address is public when Python's =ipaddress= says =is_global=, it is not multicast, and (IPv6) it
+    is not in =::/96= or =64:ff9b::/96=, which can carry a private IPv4 (=is_global= alone is True
+    for =224.0.0.1=, =239.1.1.1=, =ff02::1=, =64:ff9b::10.0.0.1= and =::10.0.0.1=, Python 3.14.7,
+    checked 2026-11-24). An address that cannot be classified is skipped. Stderr gives the count
+    (=third-party services: 254 non-public addresses skipped=). Two locks: the core passes
+    third-party modules public addresses only; the shared HTTP function every third-party module
+    sends through takes the IPs each request carries (batch, bulk and count requests included) and
+    refuses to send if any is not public. A test checks that third-party modules import none of
+    =socket=, =ssl=, =http=, =urllib= and =dns=. Reason: no service has useful data on them, they
+    spend daily quotas, and they reveal the client's internal addressing. Backlog: an override for
+    passive-DNS services (they record public names pointing to private addresses, mixed with names
+    from every other organisation using the same address).
+  - Backlog: Onyphe range searches (=ip:CIDR=, up to /16); Censys; HackerTarget; Netlas;
+    Validin; SecurityTrails; Robtex (10/h); ThreatMiner (unreachable 2026-11-24); Cloudflare
+    Intel API (needs an account).
+  - Rejected: WhoisXML (500 credits once); account and credit reporting, cost estimates and
+    caps (outside the tool's purpose).
+- D25, settled: =shared= label; cloud and zone-file methods in the backlog.
+  - =shared= label: rows whose IP is in Cloudflare's or AWS CloudFront's published ranges.
+    =python -m ip2fqdn.ranges= (an install step, D4) downloads the lists (Cloudflare
+    =ips-v4=/=ips-v6=, AWS =ip-ranges.json= filtered to CLOUDFRONT) into
+    =ip2fqdn/data/shared-ranges.txt=; running it again refreshes them; no network at run time.
+    File missing: no =shared= label, one note on stderr.
+  - Backlog (designs kept for when a real need shows up). =aws= and =cloudflare= bring back a
+    =cloud= kind (D16), left out of the quick methods like =api= (D27), and a =cloud= preset
+    (D14); both belong to the =cloud= and =passive= presets.
+    - =zonefile= (kind =file=; =default=, =passive=): BIND-format zone files (exports, saved
+      =dig axfr= output) given as plain arguments; A/AAAA records pointing to listed IPs give
+      names, CNAME chains followed inside the file. Use a lenient line reader for A, AAAA and
+      CNAME records rather than dnspython's zone parser (it needs the zone name for =dig axfr=
+      output, rejects the whole file over one CNAME conflict, follows =$INCLUDE=, and
+      =$GENERATE= has no size limit). Input recognition (D11) then gains a zone-file step.
+    - =aws=: Route 53 hosted zones the
+      credentials read (public and private); A/AAAA records pointing to listed IPs; alias and
+      CNAME records resolved with the DNS servers in use. Standard AWS credential sources,
+      =--aws-profile NAME=; =ViewOnlyAccess= is enough. Needs =boto3=; test fakes through
+      =AWS_ENDPOINT_URL_ROUTE_53=.
+    - =cloudflare=: DNS records of every zone the token reads
+      (=CLOUDFLARE_API_TOKEN= with both "Zone Read" and "DNS Read"); proxied records reveal
+      origin servers' names. Standard library only.
+    - AWS EC2, load balancer and CloudFront names; Azure DNS; Google Cloud DNS; other CDN
+      ranges (Akamai, Fastly, Azure, Google).
+- D26, settled: CSV output. One row per IP, name and source.
+  | Column                    | Content                                                      |
+  |---------------------------+--------------------------------------------------------------|
+  | =ip=                      | listed IP                                                    |
+  | =fqdn=                    | name, lowercased, no trailing dot (may be short, =.local= or |
+  |                           | wildcard; see =name_kind=)                                   |
+  | =source=                  | method name                                                  |
+  | =detail=                  | where it came from (=443 SAN=, =PTR @10.0.0.10=, =NTLM DNS   |
+  |                           | computer name=); several places joined with =; =             |
+  | =name_kind=               | =dotted=, =short=, =local=, =wildcard=                       |
+  | =labels=                  | =generic=, =placeholder=, =shared=, space-separated          |
+  | =dns=                     | =match=, =other=, =none=, =error=, empty if not checked      |
+  | =sni=                     | =served=, =not-served=, =error=, empty if not checked        |
+  | =first_seen=, =last_seen= | local zone with offset (=2026-11-24 15:02 +01:00=)           |
+  - Sorted by IP (numeric, IPv4 before IPv6), then name, then source. Every listed IP appears; an IP
+    with no name gets a row with only =ip=. Every source passes each name through the same host-name
+    check: ASCII letters, digits, hyphens and underscores, in labels of 1 to 63 characters separated
+    by single dots, optionally starting with =*.=, at most 253 characters, not an IP address;
+    failures (non-ASCII names included; internationalized names arrive in their =xn--= form) are
+    dropped and counted per method. A row found in several places takes the earliest first-seen and
+    the latest last-seen date. NetBIOS names with spaces give no row. Row structure: NTLM (=smb=,
+    =http-ntlm=) gives one row for the DNS computer name and one for the NetBIOS computer name
+    (short); =netbios= gives one row for the computer name (the unique <00> entry); workgroup or
+    domain and MAC go in =detail=. UTF-8, header line, standard quoting; control characters in any
+    cell written as =\xNN=. Stdout or =-o FILE=; notes and summary on stderr: per method, IPs done,
+    rows, timeouts, errors and dropped names; total time; where the output went.
+  - Rejected: one row per IP and name with merged sources (multi-valued cells); two files.
+- D27, settled: API answer cache, scheduling and clean stop.
+  - Cache (with =-o FILE= only): every third-party answer is appended to =FILE.api-cache= (JSON
+    Lines: a header line with the format version, then one line per answer: service, IP, date, the
+    findings or "nothing"), as it arrives. Errors, timeouts and answers lost to a quota stop are not
+    cached; a damaged line is ignored. A later run with the same =-o FILE= reads it whatever the IP
+    list or the methods: each selected service is sent only the listed IPs it has not answered yet,
+    and its cached findings for the listed IPs count as its own findings, with the first-seen and
+    last-seen dates the service gave; cached answers of services not selected, or for IPs not
+    listed, are not used. Whole-list API requests (bulk, batch, count) record each IP they answered.
+    The tool never deletes the file (the operator deletes it to refresh); stderr gives the number of
+    cached answers used and the date of the oldest. Without =-o=, no cache.
+  - Probes, DNS methods and checks run again on every run (minutes). Spreading daily-quota
+    services over days: run the same command again each day.
+  - Scheduling: phase 2 starts once the quick methods (phase-1 methods other than =api=) are
+    done. Each new name gets forward confirmation as soon as it is found (D19). The SNI check
+    (D23) runs in phase 2 for names from the quick methods, then for names from API methods
+    as they arrive. Names from API methods do not feed zone learning. The output is written
+    once, at the end.
+  - Clean stop on Ctrl-C or SIGTERM: the output (=FILE= or stdout) is written with everything
+    found so far, checks not yet done left empty, note "interrupted: results incomplete"; a
+    second Ctrl-C quits at once.
+  - Rejected: a progress file with =--resume= and snapshots every 5 minutes (restoring a run
+    stopped in any phase is the hard part to write and test, and only API answers are
+    expensive to redo); clean stop only (daily-quota services would always cover the same
+    first IPs).
+- D28, settled: minor points.
+  1. Name =ip2fqdn= (command, =/work/ip2fqdn/=, =ip2fqdn.org= at its root).
+  2. IP list format: one IPv4, IPv6 or CIDR entry per line; spaces trimmed; blank lines and =#=
+     comments ignored (=#= starts a comment to the end of the line, D53); invalid line: warning with
+     file and line number (first 10 per file, then a count per file); duplicates across all inputs
+     removed; =-= reads stdin.
+  3. Size guard: more than 65,536 IPs after expansion and duplicate removal stops the run
+     before any traffic, exit code 2, unless =--max-ips N= raises the limit. No IP left after
+     reading the inputs: exit 2, "no IP to look up".
+  4. masscan XML accepted like nmap XML (IPs and open ports; no names). Names from masscan
+     =--banners= banners (the =ssl= banner's CN/SAN text, =smb= NTLM =key=value= pairs, base64
+     =X509= certificate) go to the backlog: their exact format is inferred from masscan's
+     source, not yet seen in real output; build it from a real capture when one is available.
+  5. =--parallel N=, default 500 connections overall; at most 10 at once per IP; 50 DNS
+     queries at once per server. The open-file limit is raised at start to at least N + 50 per
+     DNS server + 100; if it cannot be, N is lowered with a note.
+  6. Progress: one status line refreshed every few seconds when stderr is a terminal; only
+     notes otherwise.
+  7. Exit codes: 0 completed (even with no names, and when a quota stop left IPs for a later
+     run, which stderr says), 1 fatal error, 2 wrong usage, 130 interrupted by Ctrl-C, 143 by
+     SIGTERM.
+  8. =--max-zones N=, default 500; zones beyond it skipped with a note.
+  9. An existing output file is overwritten; an existing =FILE.api-cache= is reused (D27).
+  10. =--debug=: technical log on stderr (requests, timings, errors), masked as in
+      =pentest-tools= so it can be shared: values the tool produces itself (method names,
+      ports, counts, durations, HTTP status, error types) are shown; every value from inputs,
+      targets or services goes through the masker at the log call and becomes a typed
+      placeholder numbered per run (=IP4-1=, =HOST-2=, =PATH-3.xml=, =TEXT-4[len=15]=), the
+      same value always getting the same placeholder. A debug run lines up line by line with a
+      normal run: same output and same stderr notes, with the debug lines added on stderr,
+      prefixed =[debug]=.
+  11. IPv6 supported for inputs, probes, PTR, DNS checks and APIs that accept it (no reverse
+      zone transfers, D21).
+  12. =-h= (options grouped by module), =--version=, =--list-methods=.
+- D29, settled: testing. No test reaches the Internet or a real host: fake servers on the
+  loopback interface only; any other connection fails the test.
+  - Layer 1, parsers: every hand-written reader of outside data (NTLM challenge, NetBIOS
+    reply, RDP greeting, SMTP replies, HTTP headers, zone-transfer stream (message framing,
+    size limit), names from mDNS replies, certificate names, field extraction from API JSON,
+    nmap and masscan XML, IP lists, API cache file) with valid and hostile samples
+    (truncated, inflated lengths, garbage, control characters; generated with =hypothesis=):
+    never a crash, bounded memory. Data parsed by a library (DNS messages by dnspython, mDNS
+    replies included through its =from_wire= on an own UDP endpoint, with the cache-flush
+    class bit masked, Sources; JSON; certificates by cryptography) relies on that library's
+    hardening.
+  - Layer 2, core logic: port selection, method and preset selection, labels, CSV sorting and
+    escaping, zone-transfer rules, the public-address rule (a table of every IANA
+    special-purpose IPv4 and IPv6 block, with addresses at block edges) and the protected DNS
+    rule.
+  - Layer 4, end to end: the real command on a small fake network (about 50 addresses in
+    127.0.1.0/24 playing roles: Windows server, web server, dead host, slow host); checks CSV,
+    stderr, exit codes, Ctrl-C, the API cache across two runs, the public-address rule (a run
+    on private addresses sends the API fakes nothing; on a mixed list they receive only the
+    public ones, batch, bulk and count bodies included) and the protected DNS rule. API fakes
+    replay JSON built from each API's documentation examples, or constructed from the documented
+    field names where there is none (files ending in =-constructed=, such as Shodan's count
+    response, D24). Module ports and API base
+    addresses are configurable for the fakes; =--dns-server= accepts =IP:PORT= (D19), and a
+    loopback server given that way receives zone transfers (D20), so =axfr= is tested end to
+    end. Inputs in 127.0.1.0/24 are non-public, so the protected rule applies and tests name
+    their fake DNS servers with =--dns-server=; API tests use global addresses as data only
+    (no traffic goes to them), with only API methods selected and the fake DNS server named
+    for forward confirmation.
+  - Test guard: sockets only to 127.0.1.0/24 and =::1=, ports 1024 and above; non-numeric name
+    lookups blocked; programs blocked except in tests marked to run the command, whose
+    subprocesses get the same guard through a =sitecustomize.py= on =PYTHONPATH=.
+  - Most end-to-end checks call =cli.main()= in the test process; signals and exit codes go
+    through real subprocesses.
+  - No pytest-asyncio: tests call =asyncio.run(..., debug=True)=; conftest turns asyncio's
+    slow-callback warnings (over 100 ms) into test failures.
+  - Real systems: the operator runs live tests and shares the results.
+  - Rejected: one fake-server test per module (layer 3); an optional live test suite against
+    a lab; a scale and memory check on large generated input (layer 5; removed from the
+    working method).
+- D30, settled: the =ip2fqdn= command is an entry point declared in =pyproject.toml=
+  (=[project.scripts]=, =ip2fqdn.cli:run_command=, build backend =uv_build=); =uv sync= creates it
+  as =.venv/bin/ip2fqdn= with the right interpreter path wherever the project is cloned, and the
+  README links it into the PATH. Rejected at step 6: the launcher =bin/ip2fqdn= (its first line held
+  the absolute path =/work/ip2fqdn/.venv/bin/python=; it existed because D15 put a file =ip2fqdn=
+  and the package folder =ip2fqdn/= in the same folder).
+- D31, settled: uv details. =pyproject.toml= sets =exclude-newer = 2026-11-10= (packages at least
+  two weeks old when locked) and =ruff= is a dev dependency; =[tool.uv.build-backend] module-root =
+  ""= (the package sits at the project root, not under =src/=). =uv sync= installs the project in
+  editable mode, so =ip2fqdn/data/= stays in the project folder, and its Python download adds no
+  =python3.14= link in =~/.local/bin= (checked 2026-11-26, uv 0.12.21).
+- D32, settled: module attributes are upper-case constants (=NAME=, =HELP=, =KIND=,
+  =PRESETS=, =PORTS=, =PROTOCOL=, =NMAP_SERVICES=, =RATE=, =TIMEOUT=, =PHASE=, =PARALLEL=,
+  =NEEDS=; API modules also =KEY=, =KEY_REQUIRED=); =PROTOCOL= (=tcp= or =udp=) is added for
+  the nmap port rule (D9). Third-party modules yield one answer per IP (its findings, possibly
+  none), which the core caches (D27).
+- D33, settled: zone learning skips one-label parents (=example.com= gives no candidate
+  =com=); a top-level domain is never transferable and its SOA always exists.
+- D34, settled: a zone transfer stops after 1,000,000 records (no record is kept: A and AAAA
+  records are matched against the listed IPs as they arrive).
+- D35, settled: an input file whose first 4 KB look like nmap XML but that declares XML
+  entities, or whose root is not =nmaprun=, is an input error (exit 2), like an unreadable file.
+- D36, settled: =nmap-names= details: =nmap PTR=, =nmap user=, =25 nmap service=,
+  =443 nmap ssl-cert SAN=, =3389 nmap rdp-ntlm-info DNS computer name=,
+  =nmap smb-os-discovery fqdn=; the NetBIOS computer names of =*-ntlm-info= and
+  =smb-os-discovery= =server= give short rows, as NTLM does (D26). The =ssl-cert= PEM is read
+  with =cryptography= when present (same code as =tls=), the structured subject and SAN
+  otherwise.
+- D37, settled: errors. Connection refused or reset, TLS errors and truncated replies are "no
+  answer" (a debug line only); timeouts are counted (D17); any other exception is counted as an
+  error, the first 5 per method shown as warnings. Same rule for "over the read limit" warnings
+  (=smtp=): first 5 shown, all counted in the summary.
+- D38, settled: =--debug= masks only the =[debug]= lines, as D28 says (output and notes
+  unchanged). The masking is chosen by field name at the log call (=ip=, =server=: =IP4-n=;
+  =host=, =name=, =zone=: =HOST-n=; =path=; =text=, =url=, =value=: =TEXT-n=); other fields
+  carry values the tool produces. To share a debug run, share the =[debug]= lines.
+- D39, settled: asyncio's own log is kept off stderr (it prints messages such as "returning
+  true from eof_received() has no effect when using ssl" after =start_tls=, Sources).
+- D40, settled: API cache header line ={"format": "ip2fqdn-api-cache", "version": 1}=; dates
+  as Unix times; a file with another first line is neither used nor written (warning).
+- D41, settled: test guard detail. A fake server bound in 127.0.1.0/24 may send UDP replies
+  to 127.0.0.1: Linux gives a client talking to 127.0.1.x the source address 127.0.0.1.
+- D42, settled: =netbios= takes the unique =<00>= name as D26 says (the research notes
+  suggested =<20>= first); detail =137 NetBIOS <00>, workgroup or domain CORP, MAC
+  00:15:5d:01:02:03=. =smtp= read limits are D16's (100 lines, 4 KB per line).
+- D43, settled: HTTP Host header carries the port when it is not the scheme's default
+  (=Host: 192.0.2.10:8080=); =http-ntlm= opens one connection per path.
+- D44, settled: request sizes. Onyphe bulk requests carry 100 IPs each: D24's whole list goes
+  through the bulk endpoint in several requests (maximum not documented; 32 MB response cap);
+  VirusTotal: first page only, 40 resolutions; urlscan: first page only, 100 results; mnemonic:
+  =limit=1000=; Shodan range search: at most 100 pages per /24.
+- D45, settled: third-party errors. A request with no HTTP answer (connection error, timeout)
+  is not retried and counts toward D17's five failures in a row. HTTP 401 or 403 from a
+  service switches its method off for the run (key refused). Waits use =Retry-After=, or
+  urlscan's =X-Rate-Limit-Reset-After=. Onyphe error 1005 ("no more credits") is a
+  quota-spent reply. VirusTotal's HTTP 429: one 60 s wait instead of 5, 10 then 20 s (it uses
+  one retry); a second 429 is the quota-spent reply of D16. The 30 s read limit of D17 is a
+  limit per wait for data (socket timeout), not for the whole response. Trial requests (D24:
+  Shodan batch lookup, count and range search, Onyphe bulk request) answered with any HTTP
+  status other than 200, 401 and 403 included, turn that capability off for the run (debug
+  line =batch lookups refused=, =counts refused=, =range searches refused=, =bulk requests
+  refused=) and the module falls back to per-IP requests; only a per-IP request answered 401
+  or 403 switches the method off. Reason: the error a plan without the capability returns is
+  not documented and may be 401 or 403. A range search with no HTTP answer falls back to
+  lookups for that /24 only.
+- D46, settled: Shodan fields. Host names from =hostnames= (host and banners), dated
+  =last_update= or the banner =timestamp=; certificate names from =ssl.chain[0]= (PEM, read
+  with =cryptography=), else =ssl.cert.subject.CN=; =domains= not used (registered domains,
+  not host names). "Shodan knows at least 10 IPs" counts the =ip= facet values. For the public check
+  (D24), a count request declares to the shared HTTP function the listed IPs of the /24 and its
+  network address; Shodan receives only the =net:= query. IPs
+  missing from a batch answer are cached as answered without data.
+- D47, settled: Onyphe fields =hostname=, =reverse=, =forward=, =subject.commonname=,
+  =subject.altname=, dated =@timestamp=, else =seen_date=. =domain= not used: it is the
+  registered domain extracted from a host name or certificate, not a name of the host (same
+  reason as Shodan's =domains=, D46); a registered domain that does name the host also comes in
+  =hostname=, =forward= or =reverse=. D24's table no longer lists domains for Onyphe. Rejected:
+  a row for =domain= (usually =dns= =other=, misleading when that column is not read).
+- D48, settled: OTX pacing one request every 3.6 s without a key, 0.36 s with one (D24's
+  10,000/h); urlscan stays at 36 s with a key (D16): its per-minute and per-hour limits with a
+  free key are not documented (only 1,000 a day), to check on the first live run.
+- D49, settled: =smtp= takes the first word of the first line of any greeting reply (codes
+  200 to 599), not only 220, 554, 521 and 421.
+- D50, settled: run mechanics. The CSV is built and written in a worker thread at the end (keeps the
+  event loop free; a 65,536-IP output is not instant). The command (=cli.run_command=, D30) ends
+  with =os._exit= after flushing, so requests still running in threads after Ctrl-C do not delay the
+  exit. Lookup workers and =sni= workers: at most =--parallel= (D23's estimate assumes 500), fewer
+  lookup workers when there is less work; =ptr= 50 queries at once per server; =dns-enum= 20 queries
+  and =axfr= 10 transfers at once in all (not per server).
+- D51, settled: details. =http-ntlm= rows carry the path (=443 /EWS/ NTLM DNS computer
+  name=); =sni= rows =443 SNI <checked name> SAN=; =axfr= =AXFR corp.example @10.0.0.10=;
+  =dns-enum= =_ldap._tcp.corp.example SRV @10.0.0.10=; =mdns= =5353 mDNS=. ANY queries never
+  count toward the 20-unanswered rule, timeouts included. "IPs done" in the summary counts the
+  IPs a method worked on. =--<method>-timeout= is generated for every module (D13, D17) but
+  acts only where =--timeout= does: per-IP-and-port methods, and each =sni= handshake; =ptr=,
+  =axfr=, =dns-enum= and the API methods are whole-list methods with D17's own limits.
+- D52, settled: code layout as built (D15 names outside =methods/= and =proto/= were provisional):
+  =cli.py= (options, signals, output), =plan.py= (selection, presets, ports), =runner.py= (phases,
+  scheduling, checks), =context.py= (per-method context, limits), =results.py=, =output.py=,
+  =inputs.py=, =nmapxml.py=, =names.py= (host-name check, labels), =addresses.py= (public rule),
+  =dnsclient.py= (servers, protected rule, queries, transfers), =apiclient.py= (the shared
+  third-party HTTP function), =apihelp.py=, =apicache.py=, =ranges.py=, =aio.py=, =common.py=
+  (masking, log, times); =proto/ntlm.py=, =proto/certs.py= (certificate names), =proto/net.py=
+  (connections, TLS context), =proto/http.py=; D15's =proto/tls.py= became =certs.py= and =net.py=.
+  Tests: =tests/guard.py= (D29 guard, also loaded by =tests/sitecustomize/= in subprocesses),
+  =tests/fakes.py= (fake network thread, certificates, fake DNS with transfers); =tests/data/= holds
+  only the fixtures the tests load (the other API examples and nmap fixtures stay in
+  =/work/ip2fqdn-sources/=). Operator files: =README.md= (usage) and =LIVE-TESTS.md= (the first live
+  runs, what to send back, and the points inferred from documentation that they check). =.gitignore=
+  leaves out =.venv/=, caches and =ip2fqdn/data/= (downloaded ranges).
+- D53, settled: in IP list files, =#= starts a comment that runs to the end of the line
+  (=10.0.0.1 # web= gives 10.0.0.1).
+- D54, settled: over a read limit (D16), HTTP header lines past 64 KB or 100 fields are not
+  read and the names from the lines already read are kept (debug line); an SMB reply over 64 KB
+  is dropped and counted as an error (warning, D37); a NetBIOS or mDNS datagram cannot exceed
+  64 KB.
+- Status 2026-11-26: steps 1 to 5 done, step 7 done up to delivery (usage notes and this document):
+  the 20 methods and the core are built in =/work/ip2fqdn/= (command declared in =pyproject.toml=,
+  D30), 180 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
+  masked values, and the usage notes are in =README.md=. The shared-range download was not run: it
+  is left to the operator, and the =ranges= code is tested on copies of the documentation samples
+  (=tests/data/cloudflare-ips-v4.txt=, =cloudflare-ips-v6.txt=, =aws-ip-ranges-excerpt.json=). Step
+  6 done: D30 to D54 settled; the open lists fixed at step 3 (D7 Exchange paths, D20 service
+  records, D23 placeholder names) and the module names (D7) kept; the option names (D13) reviewed,
+  two renamed; =setup.sh= and =bin/ip2fqdn= replaced by README install steps and an entry point (D4,
+  D30). Project made ready for git: =.gitignore=, no absolute path left in the project files, caches
+  and unused fixtures removed, live runs in =LIVE-TESTS.md=, this document moved to the project
+  root. Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule, Onyphe error 1005; D16,
+  D45) has no test. Next: the operator installs and runs the tool on real data as =LIVE-TESTS.md=
+  describes and shares what it lists (rest of step 7); each real-data fact becomes a test fixture
+  and a dated entry under Sources before the code is fixed.
+
+* Out of scope
+- Being run against real targets by the coding agent, or living in =pentest-tools= (D1, D2).
+- Calling external programs (nmap, dnsx, tlsx...) (D3).
+- A configuration file: methods and settings are chosen on the command line; secrets come
+  from environment variables (Goal, D13).
+- Discovering open ports: ports come from module defaults, options or nmap files (D9).
+- Completing a login, or sending credentials to the listed hosts (NTLM methods stop after the
+  server's challenge). =snmp= (backlog) would be an exception, to discuss if adopted.
+- Terms of use, licences and commercial-use restrictions of third-party services: handled by
+  the operator's legal team; the tool neither shows nor enforces them.
+
+* Sources
+Research notes, facts checked 2026-11-24 unless stated. Documents are read in full at step 3
+of the working method; adopted methods are in Decisions.
+
+** Step-3 research notes (full sources, URLs and dates; checked 2026-11-24)
+The notes stay on the development machine, outside the git repository; this section keeps the
+facts the decisions rely on, with their URLs and dates.
+- =/work/ip2fqdn-sources/windows.md=: NTLM, SPNEGO, SMB2, RDP, HTTP NTLM and WinRM, NetBIOS
+  byte layouts and test vectors; Exchange's default virtual-directory authentication behind
+  D7's =http-ntlm= paths.
+- =/work/ip2fqdn-sources/protocols-lists.md=: SMTP, HTTP =Location=, mDNS (RFC 6762; the
+  cache-flush class bit masked when reading replies, D29), the D20 service records and their
+  sources, the D23 placeholder list (RFC 2606, RFC 6761, vendor pages), the zone-apex test.
+- =/work/ip2fqdn-sources/apis.md= and =api-examples/=: every third-party API, with response and
+  error samples (files ending in =-constructed= were built from field names).
+- =/work/ip2fqdn-sources/nmap.md=, =nmap-fixtures/=, =gen-nmap-fixtures/=: nmap (DTD, script
+  sources) and masscan XML structures, and the fixtures built from them.
+- =/work/ip2fqdn-sources/python-libs.md= and =exp-libs/=: dnspython and cryptography
+  experiments; =exp-asyncio/=: the asyncio and ssl experiment (Python building blocks below).
+
+** Methods that query the IP (traffic to the target)
+- TLS certificate without SNI (the server sends its default certificate): CN and SAN names.
+  Ports: 443, 8443, 636 (LDAPS), 3389 (RDP: Windows puts the machine FQDN in its certificate;
+  RDP needs its own negotiation before TLS, so 3389 is not a plain TLS port — the =rdp=
+  module does the exchange first, D7), 5986 (WinRM), 993, 995, 465.
+- NTLM challenge over SMB 445, RDP, HTTP, WinRM, MSSQL: machine DNS name and AD domain, before
+  any login. Strong on internal Windows networks.
+- Banners: SMTP greeting (=220 mail.example.com ESMTP=), HTTP redirects.
+- LDAP rootDSE on domain controllers, anonymous: =dnsHostName=.
+- NetBIOS node status (NBT-NS, as =nmblookup -A=): one unicast UDP packet to port 137 of the
+  host; returns its NetBIOS name table (computer name, workgroup or domain) and MAC address.
+  Short names, not FQDNs. Works across routers when UDP 137 is not filtered (RFC 1002).
+- mDNS unicast query to UDP 5353 of the host: =host.local= names (Apple, Linux, printers).
+  Responders should ignore queries from outside their subnet (RFC 6762, section 5.5), so it
+  works on the operator's own segment only.
+
+** DNS (no traffic to the target)
+- Reverse DNS (PTR record): 0 or more names (usually 0 or 1), often missing or generic
+  (=1-2-3-4.dsl.isp.net=). Internal only through an internal DNS server.
+- Forward confirmation: resolve each name found and check it points back to the IP (one DNS
+  query per name); separates current names from stale ones.
+- Zone transfer (AXFR) from an internal DNS server, when allowed: A/AAAA records inverted.
+- DNS zones from a provider (Route 53, Cloudflare, Azure), exported zone files, IPAM or DHCP
+  exports: inverted the same way.
+- With credentials: AD computer objects (=dNSHostName=), AD-integrated DNS zones, SNMP
+  =sysName=.
+
+** Third-party services (the IP list leaves the operator's machine)
+- Shodan host lookup =/shodan/host/{ip}=: =hostnames=, =domains=. IP lookups use no query
+  credits; paid membership needed; 1 request/s on all plans.
+  https://developer.shodan.io/api, https://book.shodan.io/developer-apis/shodan-api/,
+  https://account.shodan.io/billing
+- Shodan =/dns/reverse?ips=a,b=: batch PTR. Maximum IPs per call and credit cost not stated.
+- Shodan plans: Membership $49 once (enough for IP lookups), Freelancer $69/month, Small
+  Business $359/month, Corporate $1,099/month (the only one with batch lookups, 100 IPs per
+  request). 1 request/s everywhere: 30,000 single lookups take about 8.3 h. Official Python
+  client 1.31.0 (2023-12-17) has no reverse DNS method.
+  https://help.shodan.io/developer-fundamentals/looking-up-ip-info
+- Shodan InternetDB =https://internetdb.shodan.io/{ip}=: =hostnames= "based on the reverse DNS
+  of the IP and certificate information" (Shodan Book); no key; documented rate limit: bursts
+  of up to 10,000 requests per second; updated weekly; no dates.
+  https://book.shodan.io/developer-apis/internetdb/
+- Onyphe APIv2 =/summary/ip/{ip}=: last 30 days only, 10 or 100 results per category by
+  licence; =/bulk/summary/ip= takes a file of IPs; about 1 request/s; plans billed in results
+  per month. The =simple/resolver= endpoints are deprecated (removed in APIv3).
+  https://search.onyphe.io/docs/general-apis/summary, https://onyphe.com/cti-pricing.html
+- Onyphe cost: 1 credit per query (CLI documentation); bulk lines cost the same as single calls
+  (inferred from Onyphe's own repository). Maximum IPs per bulk file not found.
+  https://search.onyphe.io/docs/onyphe-cli/installation
+- AlienVault OTX =/api/v1/indicators/IPv4/{ip}/passive_dns=: key optional (anonymous call
+  works); 1,000 requests/h without a key, 10,000 with a free key (source dated 2017, current
+  figures unverified). Records carry =hostname=, =first=, =last=.
+  https://otx.alienvault.com/assets/static/external_api.html
+- urlscan.io =/api/v1/search/?q=page.ip:"IP"=: domains scanned while on that IP (not full
+  passive DNS), =page.domain=, =page.ptr=, scan time. Anonymous: 30/min, 100/h, 500/day, 100
+  results per search, last 30 days; free account: 1,000 searches/day.
+  https://urlscan.io/user/quotas/, https://urlscan.io/docs/search/
+- mnemonic PassiveDNS =https://api.mnemonic.no/pdns/v3/{ip}=: no key; 10/min, 1,000/day, 1,000
+  results per query, HTTP 402 past the limit; the =limit= parameter is needed for more than
+  the default 25 results; =firstSeenTimestamp=, =lastSeenTimestamp=; public
+  data may be stale (newest record for 8.8.8.8: 2024-10).
+  https://docs.mnemonic.no/service-integration-guides/passivedns/docs/public/01-public_api.html
+- Robtex =https://freeapi.robtex.com/ipquery?ip==: PTR (=act=) and passive DNS (=pas=); 10
+  requests/h. ThreatMiner: passive DNS, 10/min, unreachable on 2026-11-24. Cloudflare Intel API
+  =/accounts/{id}/intel/dns?ipv4==: passive DNS with first/last seen, needs a Cloudflare
+  account; free-plan access unverified. WhoisXML Reverse IP: 500 credits once at signup.
+- VirusTotal =/api/v3/ip_addresses/{ip}/resolutions=: free key, 500/day, 4/min.
+  https://docs.virustotal.com/reference/public-vs-premium-api
+- Censys Platform host lookup: =dns.names=, =dns.reverse_dns.names=; free tier 100 hosts/month.
+  https://docs.censys.com/docs/platform-credits-free-starter
+- HackerTarget, Netlas, Validin: 10 to 50 lookups/day on free tiers. SecurityTrails: paid only,
+  from $500/month.
+- Not available: Rapid7 Sonar open data (closed 2022-02-10), CIRCL passive DNS (trusted
+  partners only). crt.sh: indexes names, not hosting IPs; JSON output not a stable API.
+- Terms (out of scope, noted only; see Out of scope): urlscan's terms forbid automated access
+  without written permission; VirusTotal's free key must not be used in business workflows.
+
+** Batch and range queries (checked 2026-11-24)
+- Shodan search with =net:CIDR=: 1 query credit per page of 100 results, page 1 included.
+  Results are banners (one per service, several per IP) with =hostnames= (from PTR),
+  =domains=, =ssl.cert.subject.CN=, =ssl.cert.extensions= (SAN encoded, to decode). Monthly
+  query credits: Membership 100, Freelancer 10,000, Small Business 200,000, Corporate
+  unlimited. No documented maximum range or result count.
+  https://help.shodan.io/the-basics/credit-types-explained, https://datapedia.shodan.io/
+- Shodan =/shodan/host/count= with facets uses no query credit; =net:X/24= with
+  =facets=ip:256= lists the IPs Shodan has data for (maximum facet values unverified), so
+  host lookups can be limited to those. There is no =hostname= facet. Since 2025-11-07 facet
+  value limits depend on the subscription level (values not published); requests above 1/s
+  get HTTP 429.
+- Onyphe: the =ip:= filter accepts CIDR up to /16; Search API pages up to 10,000 results,
+  10,000 results per query at most, last 30 days unless history is asked. =resolver= returns
+  =hostname=; =datascan= returns =hostname=, =domain=, =reverse=, =subject.commonname=,
+  =subject.altname=. Plans sized in results per month (cost per result probable, not
+  stated). Which licences include Search: not stated.
+  https://search.onyphe.io/docs/onyphe-query-language,
+  https://search.onyphe.io/docs/general-apis/search
+- Censys: free accounts cannot search through the API; bulk lookups cost 1 credit per result
+  (a /24: about 256 credits, more than the 100 free). Search from the Starter plan ($79/month,
+  500 credits). https://docs.censys.com/docs/platform-credits-free-starter
+- VirusTotal and OTX: one IP per request (VirusTotal range search needs premium access).
+- Account information without cost: Shodan =/api-info= (plan, query credits left); Onyphe
+  =/api/v2/user= (licence name, remaining credits, expiry, APIs and categories included).
+  =/shodan/host/count= "does not consume query credits" (documented).
+  https://search.onyphe.io/docs/general-apis/user, https://developer.shodan.io/api
+- The operator does not know which Shodan plan or Onyphe licence the keys belong to (rule in
+  D24).
+
+** Cloud
+- AWS, only for accounts the operator can read: Route 53 records (A/AAAA values), EC2
+  =PublicDnsName= / =PrivateDnsName= (AWS-generated names), load balancer DNS names, CloudFront
+  aliases. Managed policy =ViewOnlyAccess= covers these calls without data reads. Needs =boto3=.
+  https://docs.aws.amazon.com/aws-managed-policy/latest/reference/ViewOnlyAccess.html
+- AWS =https://ip-ranges.amazonaws.com/ip-ranges.json=: tells whether an IP is AWS (service,
+  region); excludes BYOIP ranges.
+- Cloudflare: no public IP-to-domain service found. API =GET /zones/{zone_id}/dns_records= with "DNS
+  Read" permission, filters =type=A= and =content.exact=<IP>=; listing zones (=GET /zones=) needs
+  "Zone Read", so the token needs both permissions (confirmed 2026-11-24). Edge IPs are shared by
+  many sites; ranges at https://www.cloudflare.com/ips-v4 and https://www.cloudflare.com/ips-v6
+  allow flagging them.
+
+** nmap and masscan XML (copied from =pentest-tools=, sources checked 2026-10-30)
+- Sources: =nmap.dtd= (nmap master, last changed 2022-06-28); nmap's =xml.cc= (escaping) and
+  =service_scan.cc= (fingerprints); masscan's =src/out-xml.c= and =src/output.c= (last changed
+  2026-04-18). Code to copy: the parsing part of =/work/pentest-tools/nmap_report.py=.
+- nmap escapes =--= as =-&#45;=, and every byte below 0x20 or above 0x7F as =&#xNN;=. Control
+  characters thus become references that XML forbids (=&#x1b;=); rewrite them as =\x1b= before
+  parsing. Non-ASCII text arrives byte by byte (=Ã©=); decode it again as UTF-8 when valid.
+- masscan: one =<host>= per port or banner, banners escaped as =\xNN=, no =exit= attribute in
+  the end record, =\r\n= line endings.
+- Hostile input: XML entity declarations refused. Incomplete or damaged files keep their
+  complete hosts. Script =<script>= output is escaped as literal =\xNN= text, not XML
+  references: smb-os-discovery names can end in a literal =\x00=, stripped before the
+  host-name check. Hosts from =-Pn= and =-sL= scans are never reported down. In a =-sU= scan,
+  ports outside the port list can come back =open|filtered=.
+
+** Python building blocks (checked 2026-11-24)
+- =ssl= (Python 3.14.7, OpenSSL 3.6.5, local test): with =CERT_NONE=,
+  =minimum_version=TLSv1=, =set_ciphers("DEFAULT:@SECLEVEL=0")= and no =server_hostname= (no
+  SNI), a TLS 1.0-only server answers and =getpeercert(binary_form=True)= returns the DER
+  certificate. Distribution OpenSSL builds with crypto policies not tested.
+- asyncio and =ssl= on uv's managed Python 3.14.7 (the one =uv sync= installs; it bundles
+  OpenSSL 3.5.9, not the system's 3.6.5), loopback only, 2026-11-24; script and output in
+  =/work/ip2fqdn-sources/exp-asyncio/=:
+  - No SNI: =asyncio.open_connection(ip, port, ssl=ctx)= sends no SNI when the host is an IPv4
+    or IPv6 address, nor with =server_hostname= =None= or =""=; with a name, the name is sent
+    (seen by the server's =sni_callback=). The DER certificate comes from
+    =writer.get_extra_info("ssl_object").getpeercert(binary_form=True)=; the =peercert= extra
+    is ={}= with =CERT_NONE=.
+  - TLS 1.0-only server: reached with =minimum_version = TLSVersion.MINIMUM_SUPPORTED= and
+    =set_ciphers("DEFAULT:@SECLEVEL=0")= (TLSv1, ECDHE-ECDSA-AES256-SHA); default settings
+    fail (connection reset). =TLSVersion.TLSv1= raises a =DeprecationWarning= in 3.14,
+    =MINIMUM_SUPPORTED= does not.
+  - =StreamWriter.start_tls(ctx)= after a plain exchange works, without SNI. Around such a
+    connection's close, asyncio's own logger once wrote "returning true from eof_received()
+    has no effect when using ssl", which logging prints on stderr by default.
+  - UDP to a closed port: a connected datagram endpoint (=remote_addr=) gets
+    =error_received(ConnectionRefusedError)= for each datagram (IPv4 and IPv6); an
+    unconnected one gets nothing. TCP to a closed port: =ConnectionRefusedError= at once.
+  - Debug mode: =asyncio.run(..., debug=True)= logs a warning on the =asyncio= logger
+    ("Executing <Task ...> took 0.151 seconds") for a 150 ms blocking step, none for 50 ms; a
+    =logging.Handler= on that logger catches it.
+  - =asyncio.wait_for(asyncio.to_thread(...), 0.3)= returns after 0.3 s, but the thread runs
+    on and =asyncio.run= waits for it before returning: a blocking call delays the exit up to
+    its own timeout.
+  - =RLIMIT_NOFILE=: the soft limit can be raised up to the hard limit (524288 here) without
+    privileges; above it, =ValueError=.
+- =dnspython= 2.9.2 (2026-11-03, ISC, Python >= 3.11): async resolver =dns.asyncresolver=.
+  Found at step 3: its =Resolver= fails over to the next server instead of asking every
+  server (D19 builds one resolver per server); its zone-transfer loop has no size limit and
+  held the event loop up to 0.8 s (the transfer loop is hand-written, D20). Zone files:
+  saved =dig axfr= output is parsed only when the zone name is given; a CNAME beside other
+  data at one name makes dnspython reject the whole file; =from_file= allows =$INCLUDE= by
+  default; =$GENERATE= has no size limit; parsing ran at about 21,000 records/s (why
+  =zonefile=, in the backlog, should use its own lenient reader, D25).
+- =cryptography= 50.0.2 (2026-09-30, Apache-2.0 or BSD-3-Clause): X.509 SAN parsing. It
+  rejects some real certificates: some fail at load (wildcard CN as PrintableString, BER),
+  others at =.subject= or =.extensions= (T61String, one malformed extension); handling in D7.
+- =impacket= 0.13.1 (2026-05-19, modified Apache licence): NTLM host info over SMB without
+  credentials (=getServerDNSHostName()=, =getServerDNSDomainName()= after an anonymous login
+  attempt). Large library.
+
+** Prior art (not used, see D3; shows how others solve the same problems)
+- No maintained tool combines these sources. hakip2host (PTR plus certificate names) has no
+  licence and no change since 2022-04.
+- dnsx (MIT, Go): PTR for an IP list, resolver list, 100 threads by default, JSONL.
+- tlsx (MIT, Go): CN/SAN on several ports, 300 connections by default, falls back to other TLS
+  stacks for old servers.
+- nmap: =-sL= does reverse DNS without sending packets to targets (=--dns-servers= picks the
+  servers); scripts =ssl-cert=, =rdp-ntlm-info=, =smb-os-discovery=, =*-ntlm-info=.
+- NetExec (BSD-2-Clause, Python): SMB and RDP name and domain without credentials, via impacket.
+- massdns (GPL-3.0, C): PTR at 10,000 concurrent lookups by default.
+
+* Backlog
+Ideas not adopted for the first version; each waits for a real need.
+- Methods that query the IP (D7): =ftp=, =imap=, =pop3=, =ldap=, =rdp-ntlm=, =mssql=,
+  =dns-chaos=, =snmp= (exception to the credentials rule, see Out of scope), =llmnr=; SMB1 in
+  =smb=; an own DER reader for certificates =cryptography= cannot load (D7).
+- Timing (D17): speed profiles like nmap's =-T=; a dead-host shortcut.
+- DNS (D19, D21): DNS over HTTPS or TLS; transferring the enclosing reverse zone of each /24,
+  found through its SOA (=9.0.10.in-addr.arpa= gives =10.in-addr.arpa=; adds nothing while
+  =ptr= asks every server).
+- nmap files (D22): =nbstat=, =http-title= redirect target, =smtp-commands=, =ldap-rootdse=.
+  Names from masscan =--banners= XML (D28): build from a real capture.
+- Checks (D23): HTTP Host header check for plain-HTTP virtual hosts.
+- Third-party (D24): Onyphe range searches; Censys; HackerTarget; Netlas; Validin;
+  SecurityTrails; Robtex; ThreatMiner; Cloudflare Intel API; an override sending non-public
+  addresses to passive-DNS services.
+- Cloud and zone files (D25, designs kept there): =zonefile=, =aws=, =cloudflare=; AWS EC2,
+  load balancer and CloudFront names; Azure DNS; Google Cloud DNS; other CDN ranges (Akamai,
+  Fastly, Azure, Google).
+- Network: SOCKS proxy support, to reach an internal network through a pivot host.

@@ -1,0 +1,17 @@
+{
+  "passive_dns": [
+    {
+      "address": "8.8.8.8",
+      "first": "2023-03-29T19:40:09",
+      "last": "2023-03-29T19:40:09",
+      "hostname": "test.domain13.yulua.com",
+      "record_type": "A",
+      "indicator_link": "/indicator/hostname/test.domain13.yulua.com",
+      "flag_url": "assets/images/flags/us.png",
+      "flag_title": "United States",
+      "asset_type": "hostname",
+      "asn": "AS15169 google llc"
+    }
+  ],
+  "count": 1
+}

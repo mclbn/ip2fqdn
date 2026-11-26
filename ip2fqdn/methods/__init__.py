@@ -1,0 +1,25 @@
+from ip2fqdn.methods import (
+                             axfr,
+                             dns_enum,
+                             http,
+                             http_ntlm,
+                             internetdb,
+                             mdns,
+                             mnemonic,
+                             netbios,
+                             nmap_names,
+                             onyphe,
+                             otx,
+                             ptr,
+                             rdp,
+                             shodan,
+                             smb,
+                             smtp,
+                             sni,
+                             tls,
+                             urlscan,
+                             virustotal,
+)
+
+METHODS = [tls, rdp, smb, netbios, smtp, http, http_ntlm, mdns, ptr, axfr, dns_enum, nmap_names,
+           sni, shodan, onyphe, internetdb, otx, virustotal, urlscan, mnemonic]

@@ -1,0 +1,3 @@
+{"@category":"datascan","@timestamp":"2026-11-20T08:15:02.000Z","seen_date":"2026-11-20","ip":"192.0.2.10","port":443,"protocol":"http","tls":true,"hostname":["www.example.com","example.com"],"domain":["example.com"],"reverse":"host-192-0-2-10.isp.example.net","subject":{"commonname":"www.example.com","altname":["www.example.com","example.com"]}}
+{"@category":"resolver","@timestamp":"2017-11-25T15:19:42.000Z","@type":"reverse","domain":"google.com","ip":"8.8.8.8","ipv6":0,"reverse":"google-public-dns-a.google.com","seen_date":"2017-11-25"}
+{"@category":"none","ip":"192.0.2.99"}

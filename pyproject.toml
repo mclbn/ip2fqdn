@@ -1,0 +1,39 @@
+[project]
+name = "ip2fqdn"
+version = "1.0.0"
+description = "Finds the FQDNs of a list of IP addresses."
+requires-python = ">=3.14"
+dependencies = ["dnspython>=2.9.2", "cryptography>=50.0.2"]
+
+[project.scripts]
+ip2fqdn = "ip2fqdn.cli:run_command"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["pytest>=9.2.0", "hypothesis>=6.170.15", "ruff>=0.17.4"]
+
+[tool.uv]
+python-preference = "only-managed"
+link-mode = "copy"
+exclude-newer = "2026-11-10T00:00:00Z"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+tmp_path_retention_policy = "none"
+markers = ["allow_exec: the test may launch programs (the tool itself, as a user would)"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+# A module error never stops the run (D16); certificates give whatever they can (D7).
+"ip2fqdn/runner.py" = ["BLE001"]
+"ip2fqdn/aio.py" = ["BLE001"]
+"ip2fqdn/methods/sni.py" = ["BLE001"]
+"ip2fqdn/proto/certs.py" = ["BLE001"]

@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+# Downloaded shared ranges (python -m ip2fqdn.ranges)
+ip2fqdn/data/

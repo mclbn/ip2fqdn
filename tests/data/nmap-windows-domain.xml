@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.993 scan initiated Mon Nov 23 14:02:11 2026 as: nmap -v -sS -sU -sV -sC -&#45;max-retries 2 -p T:1-1024,1433,3389,U:137,161 -oA scans/corp 10.20.30.10-12 intranet.corp.example -->
+<nmaprun scanner="nmap" args="nmap -v -sS -sU -sV -sC -&#45;max-retries 2 -p T:1-1024,1433,3389,U:137,161 -oA scans/corp 10.20.30.10-12 intranet.corp.example" start="1795442531" startstr="Mon Nov 23 14:02:11 2026" version="7.993" xmloutputversion="1.05">
+<scaninfo type="syn" protocol="tcp" numservices="1026" services="1-1024,1433,3389"/>
+<scaninfo type="udp" protocol="udp" numservices="2" services="137,161"/>
+<verbose level="1"/>
+<debugging level="0"/>
+<taskbegin task="ARP Ping Scan" time="1795442532"/>
+<hosthint><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="10.20.30.10" addrtype="ipv4"/>
+<address addr="00:15:5D:1E:0A:10" addrtype="mac" vendor="Microsoft"/>
+<hostnames>
+</hostnames>
+</hosthint>
+<hosthint><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="10.20.30.12" addrtype="ipv4"/>
+<address addr="3C:D9:2B:4F:10:12" addrtype="mac" vendor="Hewlett Packard"/>
+<hostnames>
+</hostnames>
+</hosthint>
+<hosthint><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="10.20.30.40" addrtype="ipv4"/>
+<address addr="00:50:56:A1:22:40" addrtype="mac" vendor="VMware"/>
+<hostnames>
+<hostname name="intranet.corp.example" type="user"/>
+</hostnames>
+</hosthint>
+<taskend task="ARP Ping Scan" time="1795442533" extrainfo="4 total hosts"/>
+<host><status state="down" reason="no-response" reason_ttl="0"/>
+<address addr="10.20.30.11" addrtype="ipv4"/>
+</host>
+<taskbegin task="SYN Stealth Scan" time="1795442534"/>
+<taskend task="SYN Stealth Scan" time="1795442552" extrainfo="3078 total ports"/>
+<host starttime="1795442533" endtime="1795442659"><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="10.20.30.10" addrtype="ipv4"/>
+<address addr="00:15:5D:1E:0A:10" addrtype="mac" vendor="Microsoft"/>
+<hostnames>
+<hostname name="dc01.corp.example" type="PTR"/>
+</hostnames>
+<ports><extraports state="filtered" count="1019">
+<extrareasons reason="no-response" count="1019" proto="tcp" ports="1-52,54-87,89-134,136-138,140-388,390-444,446-1024,1433"/>
+</extraports>
+<port protocol="tcp" portid="53"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="domain" product="Simple DNS Plus" method="probed" conf="10"/></port>
+<port protocol="tcp" portid="88"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="kerberos-sec" product="Microsoft Windows Kerberos" extrainfo="server time: 2026-11-23 14:03:02Z" ostype="Windows" method="probed" conf="10"><cpe>cpe:/a:microsoft:kerberos</cpe><cpe>cpe:/o:microsoft:windows</cpe></service></port>
+<port protocol="tcp" portid="135"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="msrpc" product="Microsoft Windows RPC" ostype="Windows" method="probed" conf="10"><cpe>cpe:/o:microsoft:windows</cpe></service></port>
+<port protocol="tcp" portid="139"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="netbios-ssn" product="Microsoft Windows netbios-ssn" ostype="Windows" method="probed" conf="10"><cpe>cpe:/o:microsoft:windows</cpe></service></port>
+<port protocol="tcp" portid="389"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="ldap" product="Microsoft Windows Active Directory LDAP" extrainfo="Domain: corp.example, Site: Default-First-Site-Name" hostname="DC01" ostype="Windows" method="probed" conf="10"><cpe>cpe:/o:microsoft:windows</cpe></service></port>
+<port protocol="tcp" portid="445"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="microsoft-ds" product="Windows Server 2016 Standard 14393 microsoft-ds" method="probed" conf="10"/></port>
+<port protocol="tcp" portid="3389"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="ms-wbt-server" product="Microsoft Terminal Services" ostype="Windows" method="probed" conf="10"><cpe>cpe:/o:microsoft:windows</cpe></service><script id="rdp-ntlm-info" output="&#xa;  Target_Name: CORP&#xa;  NetBIOS_Domain_Name: CORP&#xa;  NetBIOS_Computer_Name: DC01&#xa;  DNS_Domain_Name: corp.example&#xa;  DNS_Computer_Name: DC01.corp.example&#xa;  DNS_Tree_Name: corp.example&#xa;  Product_Version: 10.0.14393&#xa;  System_Time: 2026-11-23T14:04:37+00:00"><elem key="Target_Name">CORP</elem>
+<elem key="NetBIOS_Domain_Name">CORP</elem>
+<elem key="NetBIOS_Computer_Name">DC01</elem>
+<elem key="DNS_Domain_Name">corp.example</elem>
+<elem key="DNS_Computer_Name">DC01.corp.example</elem>
+<elem key="DNS_Tree_Name">corp.example</elem>
+<elem key="Product_Version">10.0.14393</elem>
+<elem key="System_Time">2026-11-23T14:04:37+00:00</elem>
+</script><script id="ssl-cert" output="Subject: commonName=DC01.corp.example&#xa;Issuer: commonName=DC01.corp.example&#xa;Public Key type: rsa&#xa;Public Key bits: 2048&#xa;Signature Algorithm: sha256WithRSAEncryption&#xa;Not valid before: 2026-09-20T03:15:02&#xa;Not valid after:  2027-03-22T03:15:02&#xa;MD5:     ce2d ad78 81b0 ef80 2832 33bc 1aab 8da6&#xa;SHA-1:   ae48 2db2 0333 378c 5037 5ae3 8907 ade3 77fe 364d&#xa;SHA-256: e0f4 34d2 1ed2 b52c b5a7 5aa2 ff1e 0ef9 3251 138d 3d52 855c f1f8 d0fb 5452 88fb"><table key="subject">
+<elem key="commonName">DC01.corp.example</elem>
+</table>
+<table key="issuer">
+<elem key="commonName">DC01.corp.example</elem>
+</table>
+<table key="pubkey">
+<elem key="type">rsa</elem>
+<elem key="bits">2048</elem>
+<elem key="modulus">B4247ECE3023009235D989C3914AC44A3CC3111CFE961E2F66279BFC9BC7EB530EB0A32F23BA4441F9B5717C82A2216791A21AC8F62D3D5162B41BD6EE4A534473F3609781ED39D68B0E0C9CDCBFBD352494218D15F4F6728D15E116DA1A6A74D699DA1E76E9B82A360C12237F2F634C6094AF5440A423CD41D475B2DC08FC15432A817CD0F6AE3602287D945BD878AC4070D8E35633DE36A1394C3E8059B45B6163D799E8D2B7EF03D8731FDA76676421AD85F304EFBC36C9A75F670898F8638AE004B75E99B5EA8F1ECCD3F4B87B8B73547470274645E5715D9D92355E626C17B45BB316103539E9EE288E5A319535C3BD2458503B1803EB6D1A835AD81721</elem>
+<elem key="exponent">65537</elem>
+</table>
+<table key="extensions">
+<table>
+<elem key="name">X509v3 Extended Key Usage</elem>
+<elem key="value">TLS Web Server Authentication</elem>
+</table>
+<table>
+<elem key="name">X509v3 Key Usage</elem>
+<elem key="value">Key Encipherment, Data Encipherment</elem>
+</table>
+</table>
+<elem key="sig_algo">sha256WithRSAEncryption</elem>
+<table key="validity">
+<elem key="notBefore">2026-09-20T03:15:02</elem>
+<elem key="notAfter">2027-03-22T03:15:02</elem>
+</table>
+<elem key="md5">ce2dad7881b0ef80283233bc1aab8da6</elem>
+<elem key="sha1">ae482db20333378c50375ae38907ade377fe364d</elem>
+<elem key="sha256">e0f434d21ed2b52cb5a75aa2ff1e0ef93251138d3d52855cf1f8d0fb545288fb</elem>
+<elem key="pem">-&#45;&#45;&#45;&#45;BEGIN CERTIFICATE-&#45;&#45;&#45;&#45;&#xa;MIIC3jCCAcagAwIBAgIIHE4vmn07XmAwDQYJKoZIhvcNAQELBQAwHDEaMBgGA1UE&#xa;AwwRREMwMS5jb3JwLmV4YW1wbGUwHhcNMjYwOTIwMDMxNTAyWhcNMjcwMzIyMDMx&#xa;NTAyWjAcMRowGAYDVQQDDBFEQzAxLmNvcnAuZXhhbXBsZTCCASIwDQYJKoZIhvcN&#xa;AQEBBQADggEPADCCAQoCggEBALQkfs4wIwCSNdmJw5FKxEo8wxEc/pYeL2Ynm/yb&#xa;x+tTDrCjLyO6REH5tXF8gqIhZ5GiGsj2LT1RYrQb1u5KU0Rz82CXge051osODJzc&#xa;v701JJQhjRX09nKNFeEW2hpqdNaZ2h526bgqNgwSI38vY0xglK9UQKQjzUHUdbLc&#xa;CPwVQyqBfND2rjYCKH2UW9h4rEBw2ONWM942oTlMPoBZtFthY9eZ6NK37wPYcx/a&#xa;dmdkIa2F8wTvvDbJp19nCJj4Y4rgBLdembXqjx7M0/S4e4tzVHRwJ0ZF5XFdnZI1&#xa;XmJsF7RbsxYQNTnp7iiOWjGVNcO9JFhQOxgD620ag1rYFyECAwEAAaMkMCIwEwYD&#xa;VR0lBAwwCgYIKwYBBQUHAwEwCwYDVR0PBAQDAgQwMA0GCSqGSIb3DQEBCwUAA4IB&#xa;AQANCByrEw6T/R0nU4MX+fSo8TLIi48Kdx+00kWLDaY8NmpexYYXP+SLYHGJDsoK&#xa;LWPIb4N2xAYcgjFPxfMdSBzU7ryHUKPi+ltUJSZnrzw/OfBV2Mh2w3S1JZehDx66&#xa;049P9rRuF7hJ6YELMUUNND91xQSnVNweK/JK2ch1DWwm6uxIjh3uUZlG6PeL5sCU&#xa;vv4IgrEQWlWWN+uucfaPJj+sktFvTQQfp+kGn5eegJxRheWInP9aVtek1e1IT1yK&#xa;9rfWU4rt5koM/k6Yss9p00fauJhyxhpv6BwBkPMnR6NFyrcgF7T8scULK13R+crh&#xa;2N/mCSX27QY+JzKWgCi/fDnq&#xa;-&#45;&#45;&#45;&#45;END CERTIFICATE-&#45;&#45;&#45;&#45;&#xa;</elem>
+</script></port>
+<port protocol="udp" portid="137"><state state="open" reason="udp-response" reason_ttl="128"/><service name="netbios-ns" product="Microsoft Windows netbios-ssn" extrainfo="workgroup: CORP" hostname="DC01" ostype="Windows" method="probed" conf="10"><cpe>cpe:/o:microsoft:windows</cpe></service></port>
+<port protocol="udp" portid="161"><state state="open|filtered" reason="no-response" reason_ttl="0"/><service name="snmp" method="table" conf="3"/></port>
+</ports>
+<hostscript><script id="smb-os-discovery" output="&#xa;  OS: Windows Server 2016 Standard 14393 (Windows Server 2016 Standard 6.3)&#xa;  Computer name: DC01&#xa;  NetBIOS computer name: DC01\x00&#xa;  Domain name: corp.example&#xa;  Forest name: corp.example&#xa;  FQDN: DC01.corp.example&#xa;  System time: 2026-11-23T15:04:39+01:00&#xa;"><elem key="os">Windows Server 2016 Standard 14393</elem>
+<elem key="lanmanager">Windows Server 2016 Standard 6.3</elem>
+<elem key="server">DC01\x00</elem>
+<elem key="date">2026-11-23T15:04:39+01:00</elem>
+<elem key="fqdn">DC01.corp.example</elem>
+<elem key="domain_dns">corp.example</elem>
+<elem key="forest_dns">corp.example</elem>
+<elem key="workgroup">CORP\x00</elem>
+</script></hostscript><times srtt="512" rttvar="3750" to="100000"/>
+</host>
+<host starttime="1795442533" endtime="1795442626"><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="10.20.30.12" addrtype="ipv4"/>
+<address addr="3C:D9:2B:4F:10:12" addrtype="mac" vendor="Hewlett Packard"/>
+<hostnames>
+<hostname name="printer-2f.corp.example" type="PTR"/>
+</hostnames>
+<ports><extraports state="closed" count="1027">
+<extrareasons reason="reset" count="1026" proto="tcp" ports="1-1024,1433,3389"/>
+<extrareasons reason="port-unreach" count="1" proto="udp" ports="137"/>
+</extraports>
+<port protocol="udp" portid="161"><state state="open|filtered" reason="no-response" reason_ttl="0"/><service name="snmp" method="table" conf="3"/></port>
+</ports>
+<times srtt="1210" rttvar="840" to="100000"/>
+</host>
+<host starttime="1795442533" endtime="1795442662"><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="10.20.30.40" addrtype="ipv4"/>
+<address addr="00:50:56:A1:22:40" addrtype="mac" vendor="VMware"/>
+<hostnames>
+<hostname name="intranet.corp.example" type="user"/>
+<hostname name="web01.corp.example" type="PTR"/>
+</hostnames>
+<ports><extraports state="filtered" count="1022">
+<extrareasons reason="no-response" count="1022" proto="tcp" ports="1-24,26-79,81-442,444-1024,3389"/>
+</extraports>
+<port protocol="tcp" portid="25"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="smtp" product="Microsoft Exchange smtpd" hostname="web01.corp.example" ostype="Windows" method="probed" conf="10"><cpe>cpe:/a:microsoft:exchange_server</cpe><cpe>cpe:/o:microsoft:windows</cpe></service><script id="smtp-ntlm-info" output="&#xa;  Target_Name: CORP&#xa;  NetBIOS_Domain_Name: CORP&#xa;  NetBIOS_Computer_Name: WEB01&#xa;  DNS_Domain_Name: corp.example&#xa;  DNS_Computer_Name: web01.corp.example&#xa;  DNS_Tree_Name: corp.example&#xa;  Product_Version: 10.0.17763"><elem key="Target_Name">CORP</elem>
+<elem key="NetBIOS_Domain_Name">CORP</elem>
+<elem key="NetBIOS_Computer_Name">WEB01</elem>
+<elem key="DNS_Domain_Name">corp.example</elem>
+<elem key="DNS_Computer_Name">web01.corp.example</elem>
+<elem key="DNS_Tree_Name">corp.example</elem>
+<elem key="Product_Version">10.0.17763</elem>
+</script></port>
+<port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="http" product="Microsoft IIS httpd" version="10.0" ostype="Windows" method="probed" conf="10"><cpe>cpe:/a:microsoft:internet_information_services:10.0</cpe><cpe>cpe:/o:microsoft:windows</cpe></service><script id="http-ntlm-info" output="&#xa;  Target_Name: CORP&#xa;  NetBIOS_Domain_Name: CORP&#xa;  NetBIOS_Computer_Name: WEB01&#xa;  DNS_Domain_Name: corp.example&#xa;  DNS_Computer_Name: web01.corp.example&#xa;  DNS_Tree_Name: corp.example&#xa;  Product_Version: 10.0.17763"><elem key="Target_Name">CORP</elem>
+<elem key="NetBIOS_Domain_Name">CORP</elem>
+<elem key="NetBIOS_Computer_Name">WEB01</elem>
+<elem key="DNS_Domain_Name">corp.example</elem>
+<elem key="DNS_Computer_Name">web01.corp.example</elem>
+<elem key="DNS_Tree_Name">corp.example</elem>
+<elem key="Product_Version">10.0.17763</elem>
+</script></port>
+<port protocol="tcp" portid="443"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="http" product="Microsoft IIS httpd" version="10.0" ostype="Windows" tunnel="ssl" method="probed" conf="10"><cpe>cpe:/a:microsoft:internet_information_services:10.0</cpe><cpe>cpe:/o:microsoft:windows</cpe></service><script id="ssl-cert" output="Subject: commonName=intranet.corp.example/organizationName=Example Corp/countryName=FR&#xa;Subject Alternative Name: DNS:intranet.corp.example, DNS:portal.corp.example, IP Address:10.20.30.40, IP Address:FD00:20:0:0:0:0:0:40&#xa;Issuer: commonName=Example Corp Issuing CA/organizationName=Example Corp/countryName=FR&#xa;Public Key type: rsa&#xa;Public Key bits: 2048&#xa;Signature Algorithm: sha256WithRSAEncryption&#xa;Not valid before: 2026-03-02T09:12:44&#xa;Not valid after:  2028-03-01T09:12:44&#xa;MD5:     bcbf a4d5 94e7 4744 5763 5a3e 80d1 5a92&#xa;SHA-1:   ec71 bbfc 8843 ee80 589b eb25 6d80 acb2 36ef d57c&#xa;SHA-256: 9842 cf9c 5f50 e8a5 f47c 43ae b039 e476 d882 269a e2ea 60a3 a776 6129 c9f1 3a31"><table key="subject">
+<elem key="commonName">intranet.corp.example</elem>
+<elem key="countryName">FR</elem>
+<elem key="localityName">Lyon</elem>
+<elem key="organizationName">Example Corp</elem>
+<elem key="organizationalUnitName">IT</elem>
+</table>
+<table key="issuer">
+<elem key="commonName">Example Corp Issuing CA</elem>
+<elem key="countryName">FR</elem>
+<elem key="organizationName">Example Corp</elem>
+</table>
+<table key="pubkey">
+<elem key="type">rsa</elem>
+<elem key="bits">2048</elem>
+<elem key="modulus">BCC0E8A4D50C80EE68F66322E32F512731215A7292057013A94C21A16469349A4EEA76B783BE11BCE046A1BD5A1C2D9B9E3ED5CB65F52CF5DD1F3BAC05AA5AAC3D321E10C4C050608B51678FB0E239168A76C78F44EDBA25BC1AEEB92398D3C31D32584BECD26F4989A25902C81EE395C7B5C445177ACC2E53CD4F3AF90A8982526BBCC3FF75EC10E040F529105CE709754C0042FC031CBF14AD1C99A1A699A5DE99164711DEC5757766847FB37298A76D46FE0B09DF53BA6C957586573A06024AD1302156CDEB36A44B599EB7AEB2C4E677332317EFBDD24D82741C7C8FC07BC34902B2E71638FB59752DC0A72E3DE424EAB5D4CB8FA7C4A9AB4A606D476641</elem>
+<elem key="exponent">65537</elem>
+</table>
+<table key="extensions">
+<table>
+<elem key="name">X509v3 Basic Constraints</elem>
+<elem key="value">CA:FALSE</elem>
+</table>
+<table>
+<elem key="name">X509v3 Key Usage</elem>
+<elem key="value">Digital Signature, Key Encipherment</elem>
+<elem key="critical">true</elem>
+</table>
+<table>
+<elem key="name">X509v3 Extended Key Usage</elem>
+<elem key="value">TLS Web Server Authentication</elem>
+</table>
+<table>
+<elem key="name">X509v3 Subject Alternative Name</elem>
+<elem key="value">DNS:intranet.corp.example, DNS:portal.corp.example, IP Address:10.20.30.40, IP Address:FD00:20:0:0:0:0:0:40</elem>
+</table>
+<table>
+<elem key="name">X509v3 Subject Key Identifier</elem>
+<elem key="value">E6:35:F6:D6:49:95:0C:38:1A:D1:B5:F4:DC:FF:57:38:41:9F:FF:9E</elem>
+</table>
+<table>
+<elem key="name">X509v3 Authority Key Identifier</elem>
+<elem key="value">6C:D5:7E:18:1E:76:8D:CC:23:99:70:2C:9B:E1:2E:EC:CE:4B:EB:DB</elem>
+</table>
+</table>
+<elem key="sig_algo">sha256WithRSAEncryption</elem>
+<table key="validity">
+<elem key="notBefore">2026-03-02T09:12:44</elem>
+<elem key="notAfter">2028-03-01T09:12:44</elem>
+</table>
+<elem key="md5">bcbfa4d594e7474457635a3e80d15a92</elem>
+<elem key="sha1">ec71bbfc8843ee80589beb256d80acb236efd57c</elem>
+<elem key="sha256">9842cf9c5f50e8a5f47c43aeb039e476d882269ae2ea60a3a7766129c9f13a31</elem>
+<elem key="pem">-&#45;&#45;&#45;&#45;BEGIN CERTIFICATE-&#45;&#45;&#45;&#45;&#xa;MIID5TCCAs2gAwIBAgICKhcwDQYJKoZIhvcNAQELBQAwRjELMAkGA1UEBhMCRlIx&#xa;FTATBgNVBAoMDEV4YW1wbGUgQ29ycDEgMB4GA1UEAwwXRXhhbXBsZSBDb3JwIElz&#xa;c3VpbmcgQ0EwHhcNMjYwMzAyMDkxMjQ0WhcNMjgwMzAxMDkxMjQ0WjBgMQswCQYD&#xa;VQQGEwJGUjENMAsGA1UEBwwETHlvbjEVMBMGA1UECgwMRXhhbXBsZSBDb3JwMQsw&#xa;CQYDVQQLDAJJVDEeMBwGA1UEAwwVaW50cmFuZXQuY29ycC5leGFtcGxlMIIBIjAN&#xa;BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvMDopNUMgO5o9mMi4y9RJzEhWnKS&#xa;BXATqUwhoWRpNJpO6na3g74RvOBGob1aHC2bnj7Vy2X1LPXdHzusBaparD0yHhDE&#xa;wFBgi1Fnj7DiORaKdsePRO26Jbwa7rkjmNPDHTJYS+zSb0mJolkCyB7jlce1xEUX&#xa;eswuU81POvkKiYJSa7zD/3XsEOBA9SkQXOcJdUwAQvwDHL8UrRyZoaaZpd6ZFkcR&#xa;3sV1d2aEf7NymKdtRv4LCd9TumyVdYZXOgYCStEwIVbN6zakS1met66yxOZ3MyMX&#xa;773STYJ0HHyPwHvDSQKy5xY4+1l1LcCnLj3kJOq11MuPp8Spq0pgbUdmQQIDAQAB&#xa;o4HCMIG/MAkGA1UdEwQCMAAwDgYDVR0PAQH/BAQDAgWgMBMGA1UdJQQMMAoGCCsG&#xa;AQUFBwMBME0GA1UdEQRGMESCFWludHJhbmV0LmNvcnAuZXhhbXBsZYITcG9ydGFs&#xa;LmNvcnAuZXhhbXBsZYcEChQeKIcQ/QAAIAAAAAAAAAAAAAAAQDAdBgNVHQ4EFgQU&#xa;5jX21kmVDDga0bX03P9XOEGf/54wHwYDVR0jBBgwFoAUbNV+GB52jcwjmXAsm+Eu&#xa;7M5L69swDQYJKoZIhvcNAQELBQADggEBAPVZjDXqsZJa4sqW3+Jm5lVTgJ0v980B&#xa;aWbUC6jG/A90US1RF6x9VOZABpsshpO1uLTVDPw5lLxTHXBKMyMzs3CTcynqBWGE&#xa;EvwdEfCCBDj+gxc4lqRxIjd4Aa9k4Gn2yLNsijVbwRTyVd/F/pQAB+4SXJ4UVTXW&#xa;mmCGC/CYMJ7fNP9M1OPjlxYjTyEaJswPSH1Grf2RN3i0D5j53RziIgOukxJLNb1i&#xa;ruxtecWxfJGWCIHkAmQdwYYhKDKwEwSddAgyk57N340z1h7AmlTQbe7wMy2B7dMJ&#xa;vdDKrj69c+/JPtDmKcoCiu3sOj6031DIBLm3pMsU2I2u6bf6Hn6YTFU=&#xa;-&#45;&#45;&#45;&#45;END CERTIFICATE-&#45;&#45;&#45;&#45;&#xa;</elem>
+</script></port>
+<port protocol="tcp" portid="1433"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="ms-sql-s" product="Microsoft SQL Server 2019" version="15.00.2000.00" extrainfo="RTM" method="probed" conf="10"><cpe>cpe:/a:microsoft:sql_server:2019</cpe></service><script id="ms-sql-ntlm-info" output="&#xa;  10.20.30.40:1433: &#xa;    Target_Name: CORP&#xa;    NetBIOS_Domain_Name: CORP&#xa;    NetBIOS_Computer_Name: WEB01&#xa;    DNS_Domain_Name: corp.example&#xa;    DNS_Computer_Name: web01.corp.example&#xa;    DNS_Tree_Name: corp.example&#xa;    Product_Version: 10.0.17763"><table key="10.20.30.40:1433">
+<elem key="Target_Name">CORP</elem>
+<elem key="NetBIOS_Domain_Name">CORP</elem>
+<elem key="NetBIOS_Computer_Name">WEB01</elem>
+<elem key="DNS_Domain_Name">corp.example</elem>
+<elem key="DNS_Computer_Name">web01.corp.example</elem>
+<elem key="DNS_Tree_Name">corp.example</elem>
+<elem key="Product_Version">10.0.17763</elem>
+</table>
+</script></port>
+<port protocol="udp" portid="137"><state state="open|filtered" reason="no-response" reason_ttl="0"/><service name="netbios-ns" method="table" conf="3"/></port>
+<port protocol="udp" portid="161"><state state="open|filtered" reason="no-response" reason_ttl="0"/><service name="snmp" method="table" conf="3"/></port>
+</ports>
+<times srtt="512" rttvar="3750" to="100000"/>
+</host>
+<runstats><finished time="1795442663" timestr="Mon Nov 23 14:04:23 2026" summary="Nmap done at Mon Nov 23 14:04:23 2026; 4 IP addresses (3 hosts up) scanned in 132.00 seconds" elapsed="132.00" exit="success"/><hosts up="3" down="1" total="4"/>
+</runstats>
+</nmaprun>

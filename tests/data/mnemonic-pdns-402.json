@@ -1,0 +1,14 @@
+{
+    "responseCode": 402,
+    "data": null,
+    "messages": [
+        {
+            "message": "Resource limit exceeded",
+            "messageTemplate": "resource.limit.exceeded",
+            "type": "ACTION_ERROR"
+        }
+    ],
+    "metaData": {
+        "millisUntilResourcesAvailable": 558
+    }
+}

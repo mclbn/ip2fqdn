@@ -1,0 +1,191 @@
+{
+  "responseCode": 200,
+  "limit": 10,
+  "offset": 0,
+  "count": 1000,
+  "metaData": {},
+  "messages": [],
+  "data": [
+    {
+      "createdTimestamp": 1665539306270,
+      "lastUpdatedTimestamp": 1730115650648,
+      "times": 41,
+      "tlp": "white",
+      "query": "111001.xyz",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1730070230791,
+      "firstSeenTimestamp": 1665539197087,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1729762529005,
+      "lastUpdatedTimestamp": 1729818120496,
+      "times": 2,
+      "tlp": "white",
+      "query": "01smartes.win",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1729762521631,
+      "firstSeenTimestamp": 1729762521631,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728395061361,
+      "lastUpdatedTimestamp": 1728395061361,
+      "times": 1,
+      "tlp": "white",
+      "query": "0sec.us.kg",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728395055506,
+      "firstSeenTimestamp": 1728395055506,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728391477689,
+      "lastUpdatedTimestamp": 1728391477689,
+      "times": 1,
+      "tlp": "white",
+      "query": "07113650.xyz",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728388813840,
+      "firstSeenTimestamp": 1728388813840,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728391028966,
+      "lastUpdatedTimestamp": 1728391028966,
+      "times": 1,
+      "tlp": "white",
+      "query": "11457234.com",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728381980799,
+      "firstSeenTimestamp": 1728381980799,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728390957408,
+      "lastUpdatedTimestamp": 1728390957408,
+      "times": 1,
+      "tlp": "white",
+      "query": "08295114.com",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728379793558,
+      "firstSeenTimestamp": 1728379793558,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728390385194,
+      "lastUpdatedTimestamp": 1728390385194,
+      "times": 1,
+      "tlp": "white",
+      "query": "10167456.com",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728370493276,
+      "firstSeenTimestamp": 1728370493276,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728390349474,
+      "lastUpdatedTimestamp": 1728390349474,
+      "times": 1,
+      "tlp": "white",
+      "query": "08824615.com",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728368594197,
+      "firstSeenTimestamp": 1728368594197,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728390135200,
+      "lastUpdatedTimestamp": 1728390135200,
+      "times": 1,
+      "tlp": "white",
+      "query": "10619913.com",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728368469368,
+      "firstSeenTimestamp": 1728368469368,
+      "rrclass": "in",
+      "rrtype": "a"
+    },
+    {
+      "createdTimestamp": 1728389169545,
+      "lastUpdatedTimestamp": 1728389169545,
+      "times": 1,
+      "tlp": "white",
+      "query": "11462654.com",
+      "answer": "8.8.8.8",
+      "minTtl": 300,
+      "maxTtl": 300,
+      "customer": null,
+      "flags": [
+        "partialResult"
+      ],
+      "lastSeenTimestamp": 1728365108851,
+      "firstSeenTimestamp": 1728365108851,
+      "rrclass": "in",
+      "rrtype": "a"
+    }
+  ],
+  "size": 10
+}
