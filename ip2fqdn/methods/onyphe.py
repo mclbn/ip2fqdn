@@ -21,6 +21,7 @@ NEEDS = "ONYPHE_API_KEY"
 BASE = "https://www.onyphe.io/api/v2"
 BULK = 100
 NO_CREDITS = 1005
+INVALID_KEY = 3
 NAME_FIELDS = ("hostname", "reverse", "forward")
 
 
@@ -41,12 +42,26 @@ def document_findings(ip, document):
     return found
 
 
+def _error_code(document):
+    if not isinstance(document, dict) or document.get("status") != "nok":
+        return None
+    code = document.get("error")
+    return code if isinstance(code, int) and not isinstance(code, bool) else 0
+
+
 def _check_error(document, ctx):
-    if isinstance(document, dict) and document.get("status") == "nok":
-        if document.get("error") == NO_CREDITS:
-            raise ctx.quota_spent("Onyphe error 1005, no more credits")
-        return False
-    return True
+    code = _error_code(document)
+    if code == NO_CREDITS:
+        raise ctx.quota_spent("Onyphe error 1005, no more credits")
+    if code == INVALID_KEY:
+        raise ctx.switch_off("Onyphe refused the API key (error 3, invalid API key format); "
+                             "check ONYPHE_API_KEY")
+    return code is None
+
+
+def _failure(response, document):
+    code = _error_code(document)
+    return f"HTTP {response.status}" + (f", Onyphe error {code}" if code else "")
 
 
 class _Client:
@@ -67,6 +82,7 @@ class _Client:
             self.bulk_ok = False
             return None
         if response.status != 200:
+            _check_error(response.json(), self.ctx)
             self.ctx.debug("bulk requests refused", status=response.status)
             self.bulk_ok = False
             return None
@@ -94,8 +110,8 @@ class _Client:
             return None
         apihelp.check_status(response, self.ctx)
         document = response.json()
-        if response.status != 200 or not _check_error(document, self.ctx):
-            self.ctx.count(f"HTTP {response.status}")
+        if not _check_error(document, self.ctx) or response.status != 200:
+            self.ctx.count(_failure(response, document))
             return None
         results = apihelp.items(apihelp.mapping(document).get("results"))
         findings = [f for item in results for f in document_findings(ip, item)]

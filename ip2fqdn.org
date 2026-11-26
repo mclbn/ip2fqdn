@@ -704,20 +704,22 @@
   through the bulk endpoint in several requests (maximum not documented; 32 MB response cap);
   VirusTotal: first page only, 40 resolutions; urlscan: first page only, 100 results; mnemonic:
   =limit=1000=; Shodan range search: at most 100 pages per /24.
-- D45, settled: third-party errors. A request with no HTTP answer (connection error, timeout)
-  is not retried and counts toward D17's five failures in a row. HTTP 401 or 403 from a
-  service switches its method off for the run (key refused). Waits use =Retry-After=, or
-  urlscan's =X-Rate-Limit-Reset-After=. Onyphe error 1005 ("no more credits") is a
-  quota-spent reply. VirusTotal's HTTP 429: one 60 s wait instead of 5, 10 then 20 s (it uses
-  one retry); a second 429 is the quota-spent reply of D16. The 30 s read limit of D17 is a
-  limit per wait for data (socket timeout), not for the whole response. Trial requests (D24:
-  Shodan batch lookup, count and range search, Onyphe bulk request) answered with any HTTP
-  status other than 200, 401 and 403 included, turn that capability off for the run (debug
-  line =batch lookups refused=, =counts refused=, =range searches refused=, =bulk requests
-  refused=) and the module falls back to per-IP requests; only a per-IP request answered 401
-  or 403 switches the method off. Reason: the error a plan without the capability returns is
-  not documented and may be 401 or 403. A range search with no HTTP answer falls back to
-  lookups for that /24 only.
+- D45, settled: third-party errors. A request with no HTTP answer (connection error, timeout) is not
+  retried and counts toward D17's five failures in a row. HTTP 401 or 403 from a service switches
+  its method off for the run (key refused). Waits use =Retry-After=, or urlscan's
+  =X-Rate-Limit-Reset-After=. Onyphe error 1005 ("no more credits") is a quota-spent reply.
+  VirusTotal's HTTP 429: one 60 s wait instead of 5, 10 then 20 s (it uses one retry); a second 429
+  is the quota-spent reply of D16. The 30 s read limit of D17 is a limit per wait for data (socket
+  timeout), not for the whole response. Trial requests (D24: Shodan batch lookup, count and range
+  search, Onyphe bulk request) answered with any HTTP status other than 200, 401 and 403 included,
+  turn that capability off for the run (debug line =batch lookups refused=, =counts refused=, =range
+  searches refused=, =bulk requests refused=) and the module falls back to per-IP requests; only a
+  per-IP request answered 401 or 403 switches the method off. Reason: the error a plan without the
+  capability returns is not documented and may be 401 or 403. A range search with no HTTP answer
+  falls back to lookups for that /24 only. Onyphe's error 3 ("Invalid API key format", sent with
+  HTTP 400, seen on a live run, Sources) switches the method off at once, like 401 and 403, on the
+  bulk and the per-IP paths; other Onyphe errors are counted with their number in the summary (=HTTP
+  400, Onyphe error 1011: 2=).
 - D46, settled: Shodan fields. Host names from =hostnames= (host and banners), dated
   =last_update= or the banner =timestamp=; certificate names from =ssl.chain[0]= (PEM, read
   with =cryptography=), else =ssl.cert.subject.CN=; =domains= not used (registered domains,
@@ -815,6 +817,16 @@ facts the decisions rely on, with their URLs and dates.
   sources) and masscan XML structures, and the fixtures built from them.
 - =/work/ip2fqdn-sources/python-libs.md= and =exp-libs/=: dnspython and cryptography
   experiments; =exp-asyncio/=: the asyncio and ssl experiment (Python building blocks below).
+
+** Live runs (operator)
+- 2026-11-26, =-m onyphe=, list of 98 entries, 61 public IPs after duplicates and 9 non-public
+  addresses were removed: the bulk request was refused, then every =/summary/ip/{ip}= request got
+  HTTP 400; no row. The same request by hand (=curl=, 8.8.8.8) returned HTTP 400 with
+  ={"count":0,"error":3,"myip":...,"status":"nok","text":"Invalid API key format","took":0,
+  "total":0}=: Onyphe checks the key's format before anything else and answers a malformed key with
+  HTTP 400 and error 3, not 401 or 403. The key held a =!=. Fixture:
+  =tests/data/onyphe-error-3-live.json= (=myip=, the operator's address, replaced by 192.0.2.1).
+  Handling in D45.
 
 ** Methods that query the IP (traffic to the target)
 - TLS certificate without SNI (the server sends its default certificate): CN and SAN names.

@@ -334,6 +334,34 @@ def test_shodan_invalid_key_switches_off(api_lab):
     assert len(paths) == 3 and paths[0] == "/shodan/host/count" and "," in paths[1]
 
 
+def test_onyphe_invalid_key_format_switches_off(api_lab):
+    fake, environ, argv = api_lab
+    environ["ONYPHE_API_KEY"] = "bad!key"
+    body = example("onyphe-error-3-live.json")
+    fake.route("POST", "/bulk/summary/ip", lambda request: (400, {}, body))
+    fake.route("GET", "/summary/ip/", lambda request: (400, {}, body))
+    code, out, err = run_cli([PUBLIC_24 + "10", PUBLIC_24 + "11", "8.8.8.8", "-m", "onyphe",
+                              *argv], environ=environ)
+    assert code == 0, err
+    assert "onyphe: Onyphe refused the API key (error 3, invalid API key format); check " \
+        "ONYPHE_API_KEY; switched off for the run" in err
+    assert len(fake.requests) == 1
+    assert {row["fqdn"] for row in _rows(out)} == {""}
+
+
+def test_onyphe_error_number_in_summary(api_lab):
+    fake, environ, argv = api_lab
+    environ["ONYPHE_API_KEY"] = "on-key"
+    body = '{"status": "nok", "error": 1011, "text": "too many results"}'
+    fake.route("POST", "/bulk/summary/ip", lambda request: (400, {}, body))
+    fake.route("GET", "/summary/ip/", lambda request: (400, {}, body))
+    code, _, err = run_cli([PUBLIC_24 + "10", "8.8.8.8", "-m", "onyphe", *argv],
+                           environ=environ)
+    assert code == 0, err
+    assert "HTTP 400, Onyphe error 1011: 2" in err
+    assert "shared ranges file missing (run: uv run python -m ip2fqdn.ranges)" in err
+
+
 @pytest.mark.parametrize("status, body", [
     (200, '{"status": "nok", "error": 12, "text": "access denied"}\n'),
     (403, '{"status": "nok", "error": 12, "text": "access denied"}\n')])

@@ -217,7 +217,8 @@ def _note_private(inputs, log):
 def _shared_ranges(log):
     shared = ranges.load()
     if shared is None:
-        log.note("shared ranges file missing (run setup.sh): no 'shared' label")
+        log.note("shared ranges file missing (run: uv run python -m ip2fqdn.ranges): "
+                 "no 'shared' label")
     return shared
 
 
