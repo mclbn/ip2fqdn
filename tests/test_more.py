@@ -44,8 +44,8 @@ def test_mdns_reverse_query_with_cache_flush_bit():
 @given(st.binary(max_size=200))
 def test_mdns_reply_parser_never_crashes(noise):
     query = dns.message.make_query("1.0.0.10.in-addr.arpa", "PTR")
-    assert linklocal.ptr_names(noise, query) is None or isinstance(linklocal.ptr_names(noise, query),
-                                                              list)
+    names = linklocal.ptr_names(noise, query)
+    assert names is None or isinstance(names, list)
 
 
 def _xfr_server(messages):
@@ -218,7 +218,7 @@ def test_certificate_names_hostile():
 
 def test_list_methods_help_and_version():
     code, out, _ = run_cli(["--list-methods"])
-    assert code == 0 and len(out.splitlines()) == 27
+    assert code == 0 and len(out.splitlines()) == 28
     assert out.splitlines()[0].startswith("tls         on  active phase 1")
     stream = io.StringIO()
     cli.build_parser().print_help(stream)

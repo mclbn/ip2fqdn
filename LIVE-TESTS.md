@@ -151,6 +151,16 @@ Look for: `input` rows (CNAME targets included) and the other names found for ea
 Adding a name that does not exist to `names.txt` shows such a row. Second command: `error:
 --dns-server missing: ...` and exit code 2 (`echo $?`).
 
+### 10. SNMP
+
+Switches, routers, printers, UPS. `public` is always tried first; add the client's community if
+it gave you one.
+
+    ip2fqdn 10.1.2.0/24 -m snmp --snmp-community <community> -o t10.csv --debug 2> t10.err
+
+Look for: `snmp` rows (`161 SNMP sysName (public)` or `(community 1)`) on network devices and
+printers; devices you know answer SNMP but gave no row.
+
 ## Points inferred from documentation, checked by these runs
 
 - Shodan (run 6): the `ip` facet of `/shodan/host/count` (value format, and whether the per-IP
@@ -182,3 +192,5 @@ Adding a name that does not exist to `names.txt` shows such a row. Second comman
   the client's DBA can look (runs 1, 2).
 - `llmnr`: whether Windows and systemd-resolved answer a multicast reverse query for their own
   address (run 8).
+- `snmp`: devices answering only SNMPv1 or only SNMPv2c (both are sent), and sysName values
+  that fail the name check (run 10).

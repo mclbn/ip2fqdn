@@ -36,7 +36,8 @@ class Results:
         return name, new_row, new_pair
 
     def add_row(self, finding, source, dated):
-        """Row only, e.g. for a host name without address (D55): (name, new row), None if dropped."""
+        """Row only, e.g. for a host name without address (D55): (name, new row), or None if
+        the name is dropped."""
         name = check_name(finding.name)
         if name is None:
             return None

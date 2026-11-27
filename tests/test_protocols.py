@@ -10,11 +10,12 @@ import dns.reversename
 import dns.rrset
 import fakes
 import ntlm_vectors
-from helpers import lookup
+import pytest
+from helpers import lookup, run_cli
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from ip2fqdn.methods import ftp, imap, ldap, llmnr, mssql, pop3, rdp, smtp
+from ip2fqdn.methods import ftp, imap, ldap, llmnr, mssql, pop3, rdp, smtp, snmp
 from ip2fqdn.proto import ber, ntlm
 
 # rootDSE values from nmap's ldap-rootdse sample output (scripts/ldap-rootdse.nse, a real Active
@@ -444,3 +445,73 @@ def test_tds_parsers_never_crash(data, wanted):
     except mssql.TdsError:
         pass
     mssql.sspi_challenge(data)
+
+
+def snmp_agent(name, accepted, versions=(0, 1), seen=None, value_tag=ber.OCTET_STRING):
+    """An agent answering sysName.0 for the communities and versions it accepts, silent
+    otherwise (RFC 1157 section 4.1, RFC 3416)."""
+    def respond(data, address):
+        _, content, _ = ber.read(data)
+        (_, version), (_, community), (_, pdu) = ber.children(content)
+        version, community = ber.to_int(version), community.decode()
+        if seen is not None:
+            seen.append((version, community))
+        if community not in accepted or version not in versions:
+            return []
+        request_id = ber.children(pdu)[0][1]
+        value = ber.encode(value_tag, name.encode() if value_tag == ber.OCTET_STRING else b"")
+        response = ber.sequence(ber.encode(ber.INTEGER, request_id), ber.integer(0),
+                                ber.integer(0), ber.sequence(ber.sequence(snmp.SYS_NAME, value)),
+                                tag=snmp.GET_RESPONSE)
+        return [ber.sequence(ber.integer(version), ber.octets(community.encode()), response)]
+    return respond
+
+
+def test_snmp_get_request_bytes():
+    # RFC 1157 section 4.1 message, RFC 3416 GetRequest-PDU, sysName.0 with a NULL value.
+    assert snmp.get_request(1, "public", 0x01020304) == bytes.fromhex(
+        "30290201010406" + "7075626c6963" + "a01c" + "020401020304" + "020100" + "020100"
+        + "300e" + "300c" + "06082b06010201010500" + "0500")
+
+
+def test_snmp_public_then_operator_communities():
+    seen, other_seen = [], []
+    fast = ["--connect-timeout", "0.2"]
+    with fakes.FakeNetwork() as network:
+        public = network.udp("127.0.1.86", 0, snmp_agent("sw-core-01.corp.test", {"public"},
+                                                         seen=seen))
+        private = network.udp("127.0.1.86", 0, snmp_agent("PRN-3F-02", {"s3cret"},
+                                                          seen=other_seen))
+        old = network.udp("127.0.1.86", 0, snmp_agent("ups01", {"public"}, versions=(0,)))
+        missing = network.udp("127.0.1.86", 0, snmp_agent("x", {"public"}, value_tag=0x80))
+        argv = ["--snmp-community", "other", "--snmp-community", "s3cret",
+                "--snmp-community", "public", *fast]
+        found, _ = lookup(snmp, "127.0.1.86", public, argv)
+        second, _ = lookup(snmp, "127.0.1.86", private, argv)
+        v1, _ = lookup(snmp, "127.0.1.86", old)
+        nothing, _ = lookup(snmp, "127.0.1.86", missing, fast)
+    assert [(f.name, f.detail) for f in found] == [
+        ("sw-core-01.corp.test", f"{public} SNMP sysName (public)")]
+    assert seen == [(1, "public"), (0, "public")]  # the operator's communities were not sent
+    assert [(f.name, f.detail) for f in second] == [
+        ("PRN-3F-02", f"{private} SNMP sysName (community 2)")]
+    assert [community for _, community in other_seen] == [
+        "public", "public", "other", "other", "s3cret", "s3cret"]
+    assert [f.name for f in v1] == ["ups01"] and nothing == []
+
+
+def test_snmp_closed_port_and_bad_community():
+    port = fakes.free_port("127.0.1.87")
+    with pytest.raises(ConnectionRefusedError):
+        lookup(snmp, "127.0.1.87", port)
+    code, _, err = run_cli(["127.0.1.87", "-m", "snmp", "--snmp-community", ""])
+    assert code == 2 and "--snmp-community" in err
+
+
+@settings(max_examples=300, deadline=None)
+@given(st.binary(max_size=200))
+def test_snmp_parser_never_crashes(data):
+    try:
+        snmp.sys_name(data, {1})
+    except ber.BerError:
+        pass

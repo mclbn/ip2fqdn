@@ -123,36 +123,34 @@
   |             | only hosts on the operator's own segment answer        |           |
   | =llmnr=     | UDP 5355 reverse query by multicast, IPv4; only        | off       |
   |             | hosts on the operator's own segment answer (D62)       |           |
-  Module behavior: =smb= speaks SMB2/3 only (dialects 2.0.2 to 3.1.1); SMB1-only hosts give
-  nothing (SMB1 to the backlog). NTLM steps (=smb=, =http-ntlm=): DNS domain and forest names
-  feed zone learning (D20); rows per finding in D26. =smtp=: EHLO with the local address of the
-  connection in brackets (=EHLO [10.1.2.3]=, =EHLO [IPv6:2001:db8::1]=); the name is the first
-  word after the reply code (RFC 5321 section 4.3.1), in the greeting and in the first EHLO
-  line; STARTTLS when offered, then EHLO again; first NTLM step when an EHLO lists it (D60);
-  =QUIT=.
-  =http= and =http-ntlm=: TLS on 443, 8443, 5986 and ports nmap reports as TLS, plain HTTP
-  elsewhere; Host header = the IP; User-Agent =Mozilla/5.0 (compatible; ip2fqdn)=. =http= keeps
-  the host of a 3xx =Location= when it is a name. =http-ntlm= (default ports 5985, 5986 and
-  443): =/wsman= only on 5985 and 5986; on any other port, TLS or plain, the paths =/EWS/=,
-  =/Autodiscover/Autodiscover.xml=, =/mapi/=, =/OAB/=, =/Rpc/=
-  and last =/=, tried in that order (grounded in Exchange's default virtual-directory
-  authentication, checked 2026-11-24; =/owa/=, =/ecp/=, =/Microsoft-Server-ActiveSync/=,
-  =/PowerShell/= left out: forms, Basic or Kerberos by default, so no NTLM challenge); it
-  stops at the first path that returns a challenge on a port.
-  Certificate names (=tls=, =rdp=, =smtp= after STARTTLS, =sni=): read with =cryptography=,
-  taking whatever it can read: the CN when the SAN extension fails, the SAN names when the
-  subject fails; a certificate that does not load gives no name and is counted per method in
-  the stderr summary (=certificates unreadable: N=). Rejected for now: an own DER reader as
-  fallback (one more hostile-input parser for a case of unknown frequency; backlog until live
-  runs show the count matters).
-  Added at step 6 (operator, 2026-11-27): =ldap=, =mssql=, =imap=, =pop3=, =ftp=, =llmnr=, and
-  the first NTLM step in =rdp= (the backlog's =rdp-ntlm=) and =smtp= (D58 to D63). Backlog:
-  =snmp= (=sysName=, community string needed); =dns-chaos= (=hostname.bind=, =id.server=: little
-  gain, the DNS servers it would name already get names from =smb=, =ptr= or certificates).
-  Rejected: =ssh=, =vnc= and other services whose banners hold no names.
-  Estimate, not measured: about 27 connection attempts per IP with the default methods (19
-  before D58 to D63); 5,000 IPs with 500 in parallel and the 3 s connect timeout (D17) take
-  about 13.5 minutes in the worst case.
+  | =snmp=      | UDP 161: =sysName= with community =public=, then each  | off       |
+  |             | =--snmp-community= (D64)                               |           |
+  dule behavior: =smb= speaks SMB2/3 only (dialects 2.0.2 to 3.1.1); SMB1-only hosts give nothing
+  (SMB1 to the backlog). NTLM steps (=smb=, =http-ntlm=): DNS domain and forest names feed zone
+  learning (D20); rows per finding in D26. =smtp=: EHLO with the local address of the connection in
+  brackets (=EHLO [10.1.2.3]=, =EHLO [IPv6:2001:db8::1]=); the name is the first word after the
+  reply code (RFC 5321 section 4.3.1), in the greeting and in the first EHLO line; STARTTLS when
+  offered, then EHLO again; first NTLM step when an EHLO lists it (D60); =QUIT=. =http= and
+  =http-ntlm=: TLS on 443, 8443, 5986 and ports nmap reports as TLS, plain HTTP elsewhere; Host
+  header = the IP; User-Agent =Mozilla/5.0 (compatible; ip2fqdn)=. =http= keeps the host of a 3xx
+  =Location= when it is a name. =http-ntlm= (default ports 5985, 5986 and 443): =/wsman= only on
+  5985 and 5986; on any other port, TLS or plain, the paths =/EWS/=,
+  =/Autodiscover/Autodiscover.xml=, =/mapi/=, =/OAB/=, =/Rpc/= and last =/=, tried in that order
+  (grounded in Exchange's default virtual-directory authentication, checked 2026-11-24; =/owa/=,
+  =/ecp/=, =/Microsoft-Server-ActiveSync/=, =/PowerShell/= left out: forms, Basic or Kerberos by
+  default, so no NTLM challenge); it stops at the first path that returns a challenge on a port.
+  Certificate names (=tls=, =rdp=, =smtp= after STARTTLS, =sni=): read with =cryptography=, taking
+  whatever it can read: the CN when the SAN extension fails, the SAN names when the subject fails; a
+  certificate that does not load gives no name and is counted per method in the stderr summary
+  (=certificates unreadable: N=). Rejected for now: an own DER reader as fallback (one more
+  hostile-input parser for a case of unknown frequency; backlog until live runs show the count
+  matters). Added at step 6 (operator, 2026-11-27): =ldap=, =mssql=, =imap=, =pop3=, =ftp=, =llmnr=,
+  and the first NTLM step in =rdp= (the backlog's =rdp-ntlm=) and =smtp= (D58 to D63). Then =snmp=
+  (operator, 2026-11-27, D64). Backlog: =dns-chaos= (=hostname.bind=, =id.server=: little gain, the
+  DNS servers it would name already get names from =smb=, =ptr= or certificates). Rejected: =ssh=,
+  =vnc= and other services whose banners hold no names. Estimate, not measured: about 27 connection
+  attempts per IP with the default methods (19 before D58 to D63); 5,000 IPs with 500 in parallel
+  and the 3 s connect timeout (D17) take about 13.5 minutes in the worst case.
 - D8, settled: nmap XML scan results (and masscan XML, D28) accepted as input, several files
   at once (=scans/*.xml= expanded by the shell). Parsing code from =pentest-tools= (its
   =nmap_report= tool) copied into the project, never imported, and extended: its parser drops
@@ -199,24 +197,24 @@
   =ip2fqdn -m default,mdns --skip netbios 10.0.1.0/24=. Rejected: one option with =+=/=-=
   signs (the option parser reads =-m -netbios= as two options); one flag per method.
 - D13, settled with D12 (option names reviewed at step 6): =--list-methods= prints one line per
-  method: name, on/off state, kind, phase, presets, needs (API key variable, DNS server) and
-  ports. Options: =-m/--methods=, =--skip=, =-o/--output=, =--dns-server=, =--protected-dns=
-  (D19), =--zones=, =--no-forward-confirm= (D19), =--parallel=, =--connect-timeout=,
-  =--timeout=, =--max-ips=, =--max-zones=, =--debug=, =--list-methods=, =--version=,
-  =--shodan-search=; generated for every
-  module: =--<method>-timeout= and, for every method that probes ports of the listed IPs (=smb=,
-  =netbios=, =rdp=, =mdns= included; not =sni=, which uses the ports where =tls= answered),
-  =--<method>-ports= (the test fakes need ports 1024 and above, D29). Per-module options are
-  prefixed with the module name and grouped by module in =--help= (=--tls-ports=,
-  =--smtp-ports=...); a list may include the word =default= (=--tls-ports default,10443= adds,
-  =--tls-ports 10443= replaces). API keys only from environment variables (listed in D24), never
-  from the command line. API base addresses can be overridden with =IP2FQDN_<METHOD>_URL= variables
-  (not shown in =--help=; for the test fakes). A method named explicitly whose key is missing stops
-  the run before any traffic, exit 2; the same method pulled in by a preset is skipped with a note
-  on stderr. Renamed at step 6: =--paranoid= became =--protected-dns= (in nmap, "paranoid" is
-  the slowest timing mode) and =--no-confirm= became =--no-forward-confirm= (elsewhere "no
-  confirm" means "do not ask before acting"); both new names match the terms of the README
-  and the stderr notes.
+  method: name, on/off state, kind, phase, presets, needs (API key variable, DNS server) and ports.
+  Options: =-m/--methods=, =--skip=, =-o/--output=, =--dns-server=, =--protected-dns= (D19),
+  =--zones=, =--no-forward-confirm= (D19), =--parallel=, =--connect-timeout=, =--timeout=,
+  =--max-ips=, =--max-zones=, =--debug=, =--list-methods=, =--version=, =--shodan-search=,
+  =--snmp-community= (D64); generated for every module: =--<method>-timeout= and, for every method
+  that probes ports of the listed IPs (=smb=, =netbios=, =rdp=, =mdns= included; not =sni=, which
+  uses the ports where =tls= answered), =--<method>-ports= (the test fakes need ports 1024 and
+  above, D29). Per-module options are prefixed with the module name and grouped by module in
+  =--help= (=--tls-ports=, =--smtp-ports=...); a list may include the word =default= (=--tls-ports
+  default,10443= adds, =--tls-ports 10443= replaces). API keys only from environment variables
+  (listed in D24), never from the command line; SNMP communities are the exception, given with
+  =--snmp-community= at the operator's request (D64). API base addresses can be overridden with
+  =IP2FQDN_<METHOD>_URL= variables (not shown in =--help=; for the test fakes). A method named
+  explicitly whose key is missing stops the run before any traffic, exit 2; the same method pulled
+  in by a preset is skipped with a note on stderr. Renamed at step 6: =--paranoid= became
+  =--protected-dns= (in nmap, "paranoid" is the slowest timing mode) and =--no-confirm= became
+  =--no-forward-confirm= (elsewhere "no confirm" means "do not ask before acting"); both new names
+  match the terms of the README and the stderr notes.
 - D14, settled: presets, usable in =-m= and =--skip=. Each module declares the presets it
   belongs to, so a new module joins them with no other change.
   | Preset    | Meaning                                  | Members                             |
@@ -228,7 +226,8 @@
   |           |                                          | =nmap-names=, =sni=                 |
   | =all=     | every implemented method                 |                                     |
   | =active=  | sends traffic to the listed IPs          | =default= active members, =mdns=,   |
-  |           |                                          | =llmnr=; later: D7 backlog methods  |
+  |           |                                          | =llmnr=, =snmp=; later: D7 backlog  |
+  |           |                                          | methods                             |
   | =dns=     | queries DNS servers only                 | =ptr=, =axfr=, =dns-enum=           |
   | =api=     | calls third-party Internet services      | =shodan=, =onyphe=, =internetdb=,   |
   |           |                                          | =otx=, =virustotal=, =urlscan=,     |
@@ -951,9 +950,24 @@
   Windows hosts), more where 445 is filtered and 1433 is not. Certificate names not read: the
   default certificate is the self-signed =SSL_Self_Signed_Fallback=, and the challenge gives the
   FQDN. TDS messages up to 64 KB; anything else is counted (=unreadable replies=).
+- D64, settled (operator, 2026-11-27): =snmp= (=active= only, off by default; UDP 161, nmap service
+  =snmp=). Community =public= first, then each =--snmp-community NAME= (repeatable, 1 to 255 bytes,
+  repeats dropped) in command-line order, until one answers. Each community gets one round: a
+  GetRequest for =sysName.0= (1.3.6.1.2.1.1.5.0, RFC 3418) sent as SNMPv2c (RFC 1901, 3416) and as
+  SNMPv1 (RFC 1157) together, then the connect timeout; no retry, so a silent IP takes the connect
+  timeout once per community (=public= and two more fit in the default 10 s). A device that accepts
+  =public= never receives the operator's communities. Rows: the sysName (nulls and spaces trimmed),
+  detail =161 SNMP sysName (public)= or =(community N)=, N its rank among the added communities: a
+  community's value never reaches the CSV or the debug lines. A closed port (ICMP port unreachable)
+  ends the IP at once; a v2c exception (=noSuchObject=...) or an error status gives no row. Two
+  rules give way at the operator's request: the tool sends credentials to the listed hosts (Out of
+  scope), and they come from the command line rather than the environment (D13), so they show in the
+  process list and the shell history. A wrong community may make a device send an
+  =authenticationFailure= trap to the client's monitoring (RFC 3418, =snmpEnableAuthenTraps=).
+  Rejected: SNMPv3 (without a user it returns an engine ID, no name).
 - Status 2026-11-27: steps 1 to 5 done, step 7 done up to delivery (usage notes and this document):
-  the 26 methods and the core are built in =/work/ip2fqdn/= (command declared in =pyproject.toml=,
-  D30), 217 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
+  the 27 methods and the core are built in =/work/ip2fqdn/= (command declared in =pyproject.toml=,
+  D30), 221 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
   masked values, and the usage notes are in =README.md=. The shared-range download was not run: it
   is left to the operator, and the =ranges= code is tested on copies of the documentation samples
   (=tests/data/cloudflare-ips-v4.txt=, =cloudflare-ips-v6.txt=, =aws-ip-ranges-excerpt.json=). Step
@@ -965,12 +979,12 @@
   root. Live runs so far: Onyphe works (bulk reader fixed for =ip= lists, D47); Shodan next. Host
   names as input added (D55, live run 9 in =LIVE-TESTS.md=); =--merge-results= added (D56);
   per-method progress (D57); rows without IP for input names without address (D55, 2026-11-27);
-  methods =ldap=, =mssql=, =imap=, =pop3=, =ftp=, =llmnr= and NTLM steps in =rdp= and =smtp= (D58
-  to D63, 2026-11-27).
-  Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule,
+  methods =ldap=, =mssql=, =imap=, =pop3=, =ftp=, =llmnr= and NTLM steps in =rdp= and =smtp= (D58 to
+  D63, 2026-11-27); =snmp= (D64). Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule,
   Onyphe error 1005; D16, D45) has no test. Next: the operator installs and runs the tool on real
   data as =LIVE-TESTS.md= describes and shares what it lists (rest of step 7); each real-data fact
-  becomes a test fixture and a dated entry under Sources before the code is fixed.
+  becomes a test fixture and a dated entry under Sources before the code is fixed. The operator
+  reports only problems: a run not reported is taken as working (operator, 2026-11-27).
 
 * Out of scope
 - Being run against real targets by the coding agent, or living in =pentest-tools= (D1, D2).
@@ -978,9 +992,10 @@
 - A configuration file: methods and settings are chosen on the command line; secrets come
   from environment variables (Goal, D13).
 - Discovering open ports: ports come from module defaults, options or nmap files (D9).
-- Completing a login, or sending credentials to the listed hosts (NTLM steps in =smb=,
-  =http-ntlm=, =rdp=, =smtp=, =imap=, =pop3= and =mssql= stop after the server's challenge; =ldap=
-  searches without a bind). =snmp= (backlog) would be an exception, to discuss if adopted.
+- Completing a login, or sending credentials to the listed hosts (NTLM steps in =smb=, =http-ntlm=,
+  =rdp=, =smtp=, =imap=, =pop3= and =mssql= stop after the server's challenge; =ldap= searches
+  without a bind). Exception: =snmp= sends SNMP community strings, =public= and those given with
+  =--snmp-community= (operator, 2026-11-27, D64).
 - Terms of use, licences and commercial-use restrictions of third-party services: handled by
   the operator's legal team; the tool neither shows nor enforces them.
 
@@ -1097,6 +1112,10 @@ facts the decisions rely on, with their URLs and dates.
   length). Error 17830 on a login the client closes: alihacks.github.io (2020-11-29) and
   dba.stackexchange.com question 341626, both quoting the message with its =negotiating SSPI=
   timing.
+- SNMP (checked 2026-11-27): RFC 1157 section 4.1 (message: version 0, community, PDU; GetRequest
+  [0], GetResponse [2]), RFC 1901 (community-based SNMPv2c, version 1), RFC 3416 section 3 (PDUs,
+  noSuchObject, noSuchInstance, endOfMibView), RFC 3418 (sysName, snmpEnableAuthenTraps). Request
+  bytes of the tests checked by hand against these.
 ** DNS (no traffic to the target)
 - Reverse DNS (PTR record): 0 or more names (usually 0 or 1), often missing or generic
   (=1-2-3-4.dsl.isp.net=). Internal only through an internal DNS server.
@@ -1275,10 +1294,9 @@ facts the decisions rely on, with their URLs and dates.
 
 * Backlog
 Ideas not adopted for the first version; each waits for a real need.
-- Methods that query the IP (D7): =snmp= (exception to the credentials rule, see Out of
-  scope); =dns-chaos= (little gain, D7); SMB1 in =smb=; an own DER reader for certificates
-  =cryptography= cannot load (D7). =mssql=: TDS 8 (TLS first, SQL Server 2022 strict
-  encryption), SQL Server Browser (UDP 1434) for the dynamic ports of named instances (D63).
+- Methods that query the IP (D7): =dns-chaos= (little gain, D7); SMB1 in =smb=; an own DER reader
+  for certificates =cryptography= cannot load (D7). =mssql=: TDS 8 (TLS first, SQL Server 2022
+  strict encryption), SQL Server Browser (UDP 1434) for the dynamic ports of named instances (D63).
   =llmnr= over IPv6 (D62). =ftp=: short host names in vendor greeting layouts (D61).
 - Timing (D17): speed profiles like nmap's =-T=; a dead-host shortcut.
 - DNS (D19, D21): DNS over HTTPS or TLS; transferring the enclosing reverse zone of each /24,

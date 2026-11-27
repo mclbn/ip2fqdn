@@ -64,7 +64,8 @@ a host name.
 | `--connect-timeout S` | TCP connect or UDP reply (default 3) |
 | `--timeout S` | total time per method, IP and port (default 10; `smtp` 20) |
 | `--<method>-timeout S` | same, for one method; wins over `--timeout` |
-| `--<method>-ports LIST` | ports of the methods that send traffic (`tls`, `rdp`, `smb`, `ldap`, `mssql`, `netbios`, `smtp`, `imap`, `pop3`, `ftp`, `http`, `http-ntlm`, `mdns`, `llmnr`); `default,10443` adds, `10443` replaces |
+| `--<method>-ports LIST` | ports of the methods that send traffic (`tls`, `rdp`, `smb`, `ldap`, `mssql`, `netbios`, `smtp`, `imap`, `pop3`, `ftp`, `http`, `http-ntlm`, `mdns`, `llmnr`, `snmp`); `default,10443` adds, `10443` replaces |
+| `--snmp-community NAME` | SNMP community tried after `public`; repeat for several (shown in the process list and shell history) |
 | `--shodan-search` | range searches (query credits) for /24 ranges where Shodan knows 10 IPs or more |
 | `--max-ips N` | largest number of IPs (default 65536) |
 | `--max-zones N` | largest number of zones (default 500) |
@@ -93,6 +94,7 @@ preset is skipped with a note.
     http-ntlm   on  active phase 1  default,active,windows      -                     5985,5986,443
     mdns        off active phase 1  active                      -                     5353/udp
     llmnr       off active phase 1  active                      -                     5355/udp
+    snmp        off active phase 1  active                      -                     161/udp
     ptr         on  dns    phase 1  default,dns,passive         DNS server            -
     axfr        on  dns    phase 2  default,dns                 DNS server            -
     dns-enum    on  dns    phase 2  default,dns,passive         DNS server            -
@@ -110,8 +112,8 @@ Presets: `default` (no Internet needed), `all`, `active` (traffic to the listed 
 `api`, `free`, `passive` (nothing sent to the listed IPs; `-m passive,axfr` adds transfers),
 `windows`, `cert`.
 
-What the protocol methods read, none of them logging in (NTLM steps stop at the server's
-challenge, `ldap` sends no bind):
+What the protocol methods read. Apart from `snmp`, none of them logs in (NTLM steps stop at the
+server's challenge, `ldap` sends no bind):
 
 - `ldap`: anonymous rootDSE search; `dnsHostName` (a domain controller's FQDN) and the domain
   names, which join the zones.
@@ -124,6 +126,10 @@ challenge, `ldap` sends no bind):
 - `mssql`: the NTLM challenge of a Windows-authentication login.
 - `mdns`, `llmnr` (off by default): reverse queries answered only by hosts on your own segment;
   `llmnr` sends them by multicast and skips IPv6 addresses.
+- `snmp` (off by default): `sysName` (switches, routers, printers, UPS, management boards),
+  asked with community `public`, then with each `--snmp-community` in order, stopping at the
+  first that answers. This one does log in: a wrong community may make the device send an
+  `authenticationFailure` trap to the client's monitoring.
 
 Two default methods leave entries the client may treat as hostile: `axfr` (zone transfer
 attempts, which DNS servers may log as an attack) and `mssql` (SQL Server logs each attempt as
@@ -138,6 +144,8 @@ of each name found, kept when a DNS server returns its SOA.
 ## Confidentiality rules
 
 - Third-party services receive public addresses only; stderr gives the number skipped.
+- SNMP communities given with `--snmp-community` appear in the CSV and debug lines only by
+  their position (`community 2`), never by value.
 - Host names given as input are resolved only by `--dns-server` servers (see Inputs).
 - Protected DNS rule: when any listed address is not public (or with `--protected-dns`), DNS
   queries go only to `--dns-server` servers, never to those of `/etc/resolv.conf`. A named

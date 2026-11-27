@@ -22,11 +22,12 @@ from ip2fqdn.methods import (
                              smb,
                              smtp,
                              sni,
+                             snmp,
                              tls,
                              urlscan,
                              virustotal,
 )
 
 METHODS = [tls, rdp, smb, ldap, mssql, netbios, smtp, imap, pop3, ftp, http, http_ntlm, mdns,
-           llmnr, ptr, axfr, dns_enum, nmap_names, sni, shodan, onyphe, internetdb, otx, virustotal,
-           urlscan, mnemonic]
+           llmnr, snmp, ptr, axfr, dns_enum, nmap_names, sni, shodan, onyphe, internetdb, otx,
+           virustotal, urlscan, mnemonic]

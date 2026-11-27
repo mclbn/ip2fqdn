@@ -8,6 +8,8 @@ SEQUENCE = 0x30
 SET = 0x31
 INTEGER = 0x02
 OCTET_STRING = 0x04
+NULL = 0x05
+OBJECT_IDENTIFIER = 0x06
 BOOLEAN = 0x01
 ENUMERATED = 0x0A
 
@@ -38,6 +40,24 @@ def integer(value, tag=INTEGER):
 
 def octets(data, tag=OCTET_STRING):
     return encode(tag, data)
+
+
+def null():
+    return encode(NULL, b"")
+
+
+def object_identifier(dotted):
+    """X.690 section 8.19: the first two arcs in one byte, then base-128 groups."""
+    arcs = [int(arc) for arc in dotted.split(".")]
+    content = bytes([40 * arcs[0] + arcs[1]])
+    for arc in arcs[2:]:
+        groups = [arc & 0x7F]
+        arc >>= 7
+        while arc:
+            groups.append(0x80 | (arc & 0x7F))
+            arc >>= 7
+        content += bytes(reversed(groups))
+    return encode(OBJECT_IDENTIFIER, content)
 
 
 def header_size(head):
