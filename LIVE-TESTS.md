@@ -14,6 +14,9 @@ option. Run them only against networks and services you are allowed to query.
   attack. If the client has not agreed to them, add `--skip axfr`.
 - They also include `mssql`: SQL Server logs each attempt (error 17830, with your address). If
   the client has not agreed, add `--skip mssql`.
+- And `snmp`: community `public` is sent to UDP 161 of every IP (a default-credential attempt;
+  a wrong community may trigger an `authenticationFailure` trap). If the client has not agreed,
+  add `--skip snmp`.
 
 ## What to send back after each run
 
@@ -52,9 +55,10 @@ Look for: `smb` and `netbios` rows for Windows hosts and Samba servers; `rdp` ro
 `3389 NTLM DNS computer name` on hosts that require NLA; `ldap` rows on domain controllers (`389
 rootDSE dnsHostName`); `http-ntlm` rows on Exchange (`443 /EWS/ ...`) and WinRM (5985, 5986);
 `smtp`, `imap` and `pop3` NTLM rows on Exchange; `mssql` rows on SQL servers (`1433 NTLM DNS
-computer name`); `ftp` greeting rows on printers, NAS and routers; `ptr` rows and the `dns`
-column (`match` expected for most); `axfr` and `dns-enum` rows (zones learned from the NTLM and
-LDAP domain names); `sni` values on HTTPS servers; timeouts per method in the summary.
+computer name`); `ftp` greeting rows on printers, NAS and routers; `snmp` rows on switches,
+routers and printers; `ptr` rows and the `dns` column (`match` expected for most); `axfr` and
+`dns-enum` rows (zones learned from the NTLM and LDAP domain names); `sni` values on HTTPS
+servers; timeouts per method in the summary.
 
 ### 2. Same range from an nmap scan
 
@@ -85,7 +89,7 @@ as nmap files, with `--dns-server`.
     ip2fqdn scans/*.xml --dns-server <DC IP> -o t4.csv --debug 2> t4.err
 
 Look for: total time and timeouts in the summary (the estimates in `ip2fqdn.org` are
-not measured: about 13 minutes for 5,000 IPs without nmap input in the worst case); memory
+not measured: about 14 minutes for 5,000 IPs without nmap input in the worst case); memory
 use if you can watch it (`/usr/bin/time -v` gives the maximum resident size).
 
 ### 5. Internet-facing assets, default methods
@@ -151,10 +155,10 @@ Look for: `input` rows (CNAME targets included) and the other names found for ea
 Adding a name that does not exist to `names.txt` shows such a row. Second command: `error:
 --dns-server missing: ...` and exit code 2 (`echo $?`).
 
-### 10. SNMP
+### 10. SNMP with the client's community
 
-Switches, routers, printers, UPS. `public` is always tried first; add the client's community if
-it gave you one.
+`snmp` runs by default with `public` (runs 1 and 2). If the client gave you a community, run the
+same range again with it; `public` is still tried first.
 
     ip2fqdn 10.1.2.0/24 -m snmp --snmp-community <community> -o t10.csv --debug 2> t10.err
 

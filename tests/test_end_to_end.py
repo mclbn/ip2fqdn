@@ -22,7 +22,7 @@ from ip2fqdn.common import Log
 WINDOWS, WEB, DEAD, SLOW, DNS = "127.0.1.10", "127.0.1.11", "127.0.1.12", "127.0.1.13", \
     "127.0.1.53"
 METHOD_PORTS = ("tls", "smb", "rdp", "http", "smtp", "netbios", "http-ntlm", "ldap", "imap",
-                "pop3", "ftp", "mssql")
+                "pop3", "ftp", "mssql", "snmp")
 COMMAND = os.path.join(os.path.dirname(sys.executable), "ip2fqdn")
 
 

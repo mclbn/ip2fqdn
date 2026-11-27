@@ -94,7 +94,7 @@ preset is skipped with a note.
     http-ntlm   on  active phase 1  default,active,windows      -                     5985,5986,443
     mdns        off active phase 1  active                      -                     5353/udp
     llmnr       off active phase 1  active                      -                     5355/udp
-    snmp        off active phase 1  active                      -                     161/udp
+    snmp        on  active phase 1  default,active              -                     161/udp
     ptr         on  dns    phase 1  default,dns,passive         DNS server            -
     axfr        on  dns    phase 2  default,dns                 DNS server            -
     dns-enum    on  dns    phase 2  default,dns,passive         DNS server            -
@@ -126,14 +126,16 @@ server's challenge, `ldap` sends no bind):
 - `mssql`: the NTLM challenge of a Windows-authentication login.
 - `mdns`, `llmnr` (off by default): reverse queries answered only by hosts on your own segment;
   `llmnr` sends them by multicast and skips IPv6 addresses.
-- `snmp` (off by default): `sysName` (switches, routers, printers, UPS, management boards),
+- `snmp`: `sysName` (switches, routers, printers, UPS, management boards),
   asked with community `public`, then with each `--snmp-community` in order, stopping at the
   first that answers. This one does log in: a wrong community may make the device send an
   `authenticationFailure` trap to the client's monitoring.
 
-Two default methods leave entries the client may treat as hostile: `axfr` (zone transfer
-attempts, which DNS servers may log as an attack) and `mssql` (SQL Server logs each attempt as
-error 17830, with your address). Add `--skip axfr,mssql` when the client has not agreed to them.
+Three default methods leave entries the client may treat as hostile: `axfr` (zone transfer
+attempts, which DNS servers may log as an attack), `mssql` (SQL Server logs each attempt as
+error 17830, with your address) and `snmp` (community `public` sent to every IP, a
+default-credential attempt; a wrong community may trigger an `authenticationFailure` trap). Add
+`--skip axfr,mssql,snmp`, or the ones concerned, when the client has not agreed to them.
 
 With nmap input, ports a scan found closed or filtered are skipped, open ports are added by
 service name, `tls` also tries every open TCP port no other method takes, and hosts reported

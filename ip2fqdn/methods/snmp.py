@@ -8,7 +8,7 @@ from ip2fqdn.proto import ber, linklocal
 NAME = "snmp"
 HELP = "SNMP sysName with community public, then each --snmp-community (v2c and v1)"
 KIND = "active"
-PRESETS = ("active",)
+PRESETS = ("default", "active")
 PORTS = (161,)
 PROTOCOL = "udp"
 NMAP_SERVICES = ("snmp",)
