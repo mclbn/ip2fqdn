@@ -1,7 +1,6 @@
 import os
 import struct
 
-from ip2fqdn.common import Finding
 from ip2fqdn.proto import net, ntlm
 
 NAME = "smb"
@@ -85,6 +84,5 @@ async def lookup(ip, port, ctx):
     if not parsed:
         ctx.debug("no challenge", ip=ip, port=port)
         return
-    ctx.learn_zones(ntlm.zones(parsed))
-    for name, detail in ntlm.findings_detail(parsed):
-        yield Finding(ip, name, f"{port} {detail}")
+    for finding in ntlm.findings(ip, port, parsed, ctx):
+        yield finding

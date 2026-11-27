@@ -6,15 +6,18 @@ READ_LIMIT = 64 * 1024
 _contexts = {}
 
 
-def tls_context():
-    context = _contexts.get("client")
+def tls_context(maximum=None):
+    """Client context accepting any certificate and old servers; maximum caps the version."""
+    context = _contexts.get(maximum)
     if context is None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+        if maximum is not None:
+            context.maximum_version = maximum
         context.set_ciphers("DEFAULT:@SECLEVEL=0")
-        _contexts["client"] = context
+        _contexts[maximum] = context
     return context
 
 

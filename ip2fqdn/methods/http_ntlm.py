@@ -1,4 +1,3 @@
-from ip2fqdn.common import Finding
 from ip2fqdn.proto import http, ntlm
 
 NAME = "http-ntlm"
@@ -34,7 +33,6 @@ async def lookup(ip, port, ctx):
         parsed = ntlm.challenge_from_headers(response[1].get("www-authenticate", []))
         if not parsed:
             continue
-        ctx.learn_zones(ntlm.zones(parsed))
-        for name, detail in ntlm.findings_detail(parsed):
-            yield Finding(ip, name, f"{port} {path} {detail}")
+        for finding in ntlm.findings(ip, f"{port} {path}", parsed, ctx):
+            yield finding
         return

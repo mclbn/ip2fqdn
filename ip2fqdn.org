@@ -99,22 +99,37 @@
   |-------------+--------------------------------------------------------+-----------|
   | =tls=       | TLS without SNI on 443, 8443, 9443, 636, 465, 993,     | on        |
   |             | 995, 5986: certificate CN and SAN                      |           |
-  | =rdp=       | 3389: RDP greeting, then TLS; certificate name         | on        |
+  | =rdp=       | 3389: RDP greeting, then TLS; certificate name; with   | on        |
+  |             | NLA, first NTLM step inside CredSSP (D59)              |           |
   | =smb=       | 445: SMB2 and first NTLM step, never completed;        | on        |
   |             | DNS name, DNS domain, NetBIOS name                     |           |
+  | =ldap=      | 389, 3268: anonymous rootDSE search; =dnsHostName=,    | on        |
+  |             | domains (D58)                                          |           |
+  | =mssql=     | 1433: TDS pre-login, then a Windows-authentication     | on        |
+  |             | login stopped at the NTLM challenge (D63)              |           |
   | =netbios=   | UDP 137 node status: computer name, domain, MAC        | on        |
-  | =smtp=      | 25, 587: greeting, EHLO, STARTTLS certificate          | on        |
+  | =smtp=      | 25, 587: greeting, EHLO, STARTTLS certificate; first   | on        |
+  |             | NTLM step if offered (D60)                             |           |
+  | =imap=      | 143, 993: STARTTLS certificate; first NTLM step if     | on        |
+  |             | offered (D60)                                          |           |
+  | =pop3=      | 110, 995: STLS certificate; first NTLM step if         | on        |
+  |             | offered (D60)                                          |           |
+  | =ftp=       | 21: host name in the greeting, AUTH TLS certificate    | on        |
+  |             | (D61)                                                  |           |
   | =http=      | 80, 8080: =GET /=, host name in a redirect             | on        |
   | =http-ntlm= | first NTLM step on 5985 and 5986 =/wsman=, and         | on        |
   |             | Exchange paths on 443 (=/EWS/=, =/Autodiscover/=...)   |           |
   | =mdns=      | UDP 5353 reverse query to every IP: =host.local=;      | off       |
   |             | only hosts on the operator's own segment answer        |           |
+  | =llmnr=     | UDP 5355 reverse query by multicast, IPv4; only        | off       |
+  |             | hosts on the operator's own segment answer (D62)       |           |
   Module behavior: =smb= speaks SMB2/3 only (dialects 2.0.2 to 3.1.1); SMB1-only hosts give
   nothing (SMB1 to the backlog). NTLM steps (=smb=, =http-ntlm=): DNS domain and forest names
   feed zone learning (D20); rows per finding in D26. =smtp=: EHLO with the local address of the
   connection in brackets (=EHLO [10.1.2.3]=, =EHLO [IPv6:2001:db8::1]=); the name is the first
   word after the reply code (RFC 5321 section 4.3.1), in the greeting and in the first EHLO
-  line; STARTTLS when offered; =QUIT=.
+  line; STARTTLS when offered, then EHLO again; first NTLM step when an EHLO lists it (D60);
+  =QUIT=.
   =http= and =http-ntlm=: TLS on 443, 8443, 5986 and ports nmap reports as TLS, plain HTTP
   elsewhere; Host header = the IP; User-Agent =Mozilla/5.0 (compatible; ip2fqdn)=. =http= keeps
   the host of a 3xx =Location= when it is a name. =http-ntlm= (default ports 5985, 5986 and
@@ -130,12 +145,14 @@
   the stderr summary (=certificates unreadable: N=). Rejected for now: an own DER reader as
   fallback (one more hostile-input parser for a case of unknown frequency; backlog until live
   runs show the count matters).
-  Backlog: =ftp=, =imap=, =pop3= (banner, STARTTLS); =ldap= (anonymous rootDSE); =rdp-ntlm=
-  (CredSSP); =mssql= (NTLM); =dns-chaos= (=hostname.bind=, =id.server=); =snmp= (=sysName=,
-  community string needed); =llmnr= (reverse query; whether hosts answer is unverified).
+  Added at step 6 (operator, 2026-11-27): =ldap=, =mssql=, =imap=, =pop3=, =ftp=, =llmnr=, and
+  the first NTLM step in =rdp= (the backlog's =rdp-ntlm=) and =smtp= (D58 to D63). Backlog:
+  =snmp= (=sysName=, community string needed); =dns-chaos= (=hostname.bind=, =id.server=: little
+  gain, the DNS servers it would name already get names from =smb=, =ptr= or certificates).
   Rejected: =ssh=, =vnc= and other services whose banners hold no names.
-  Estimate, not measured: about 19 connection attempts per IP; 5,000 IPs with 500 in
-  parallel and the 3 s connect timeout (D17) take about 9.5 minutes in the worst case.
+  Estimate, not measured: about 27 connection attempts per IP with the default methods (19
+  before D58 to D63); 5,000 IPs with 500 in parallel and the 3 s connect timeout (D17) take
+  about 13.5 minutes in the worst case.
 - D8, settled: nmap XML scan results (and masscan XML, D28) accepted as input, several files
   at once (=scans/*.xml= expanded by the shell). Parsing code from =pentest-tools= (its
   =nmap_report= tool) copied into the project, never imported, and extended: its parser drops
@@ -204,13 +221,14 @@
   belongs to, so a new module joins them with no other change.
   | Preset    | Meaning                                  | Members                             |
   |-----------+------------------------------------------+-------------------------------------|
-  | =default= | runs when =-m= is not given; needs no    | =tls=, =rdp=, =smb=, =netbios=,     |
-  |           | Internet access (local network only)     | =smtp=, =http=, =http-ntlm=, =ptr=, |
-  |           |                                          | =axfr=, =dns-enum=, =nmap-names=,   |
-  |           |                                          | =sni=                               |
+  | =default= | runs when =-m= is not given; needs no    | =tls=, =rdp=, =smb=, =ldap=,        |
+  |           | Internet access (local network only)     | =mssql=, =netbios=, =smtp=, =imap=, |
+  |           |                                          | =pop3=, =ftp=, =http=, =http-ntlm=, |
+  |           |                                          | =ptr=, =axfr=, =dns-enum=,          |
+  |           |                                          | =nmap-names=, =sni=                 |
   | =all=     | every implemented method                 |                                     |
-  | =active=  | sends traffic to the listed IPs          | =default= active members, =mdns=;   |
-  |           |                                          | later: D7 backlog methods           |
+  | =active=  | sends traffic to the listed IPs          | =default= active members, =mdns=,   |
+  |           |                                          | =llmnr=; later: D7 backlog methods  |
   | =dns=     | queries DNS servers only                 | =ptr=, =axfr=, =dns-enum=           |
   | =api=     | calls third-party Internet services      | =shodan=, =onyphe=, =internetdb=,   |
   |           |                                          | =otx=, =virustotal=, =urlscan=,     |
@@ -220,10 +238,9 @@
   | =passive= | sends nothing to the listed IPs and      | =dns= except =axfr=, =api=,         |
   |           | nothing the target logs as hostile       | =nmap-names=                        |
   | =windows= | names from Windows protocols             | =smb=, =rdp=, =netbios=,            |
-  |           |                                          | =http-ntlm=; later: =ldap=,         |
-  |           |                                          | =rdp-ntlm=, =mssql=                 |
-  | =cert=    | names from TLS certificates              | =tls=, =rdp=, =smtp=, =sni=; later: |
-  |           |                                          | =ftp=, =imap=, =pop3=               |
+  |           |                                          | =http-ntlm=, =ldap=, =mssql=        |
+  | =cert=    | names from TLS certificates              | =tls=, =rdp=, =smtp=, =imap=,       |
+  |           |                                          | =pop3=, =ftp=, =sni=                |
   A =cloud= preset returns with the =aws= and =cloudflare= methods (backlog, D25).
   Rejected: a =file= preset (local files only; superfluous), an =offline= preset (=default=
   already needs no Internet).
@@ -552,17 +569,18 @@
   | =sni=                     | =served=, =not-served=, =error=, empty if not checked        |
   | =first_seen=, =last_seen= | local zone with offset (=2026-11-24 15:02 +01:00=)           |
   - Sorted by IP (numeric, IPv4 before IPv6), then name, then source. Every listed IP appears; an IP
-    with no name gets a row with only =ip=. Rows without IP (D55) come last. Every source passes each name through the same host-name
-    check: ASCII letters, digits, hyphens and underscores, in labels of 1 to 63 characters separated
-    by single dots, optionally starting with =*.=, at most 253 characters, not an IP address;
-    failures (non-ASCII names included; internationalized names arrive in their =xn--= form) are
-    dropped and counted per method. A row found in several places takes the earliest first-seen and
-    the latest last-seen date. NetBIOS names with spaces give no row. Row structure: NTLM (=smb=,
-    =http-ntlm=) gives one row for the DNS computer name and one for the NetBIOS computer name
-    (short); =netbios= gives one row for the computer name (the unique <00> entry); workgroup or
-    domain and MAC go in =detail=. UTF-8, header line, standard quoting; control characters in any
-    cell written as =\xNN=. Stdout or =-o FILE=; notes and summary on stderr: per method, IPs done,
-    rows, timeouts, errors and dropped names; total time; where the output went.
+    with no name gets a row with only =ip=. Rows without IP (D55) come last. Every source passes
+    each name through the same host-name check: ASCII letters, digits, hyphens and underscores, in
+    labels of 1 to 63 characters separated by single dots, optionally starting with =*.=, at most
+    253 characters, not an IP address; failures (non-ASCII names included; internationalized names
+    arrive in their =xn--= form) are dropped and counted per method. A row found in several places
+    takes the earliest first-seen and the latest last-seen date. NetBIOS names with spaces give no
+    row. Row structure: NTLM (=smb=, =http-ntlm=, D59, D60, D63) gives one row for the DNS computer
+    name and one for the NetBIOS computer name (short); =netbios= gives one row for the computer
+    name (the unique <00> entry); workgroup or domain and MAC go in =detail=. UTF-8, header line,
+    standard quoting; control characters in any cell written as =\xNN=. Stdout or =-o FILE=; notes
+    and summary on stderr: per method, IPs done, rows, timeouts, errors and dropped names; total
+    time; where the output went.
   - Rejected: one row per IP and name with merged sources (multi-valued cells); two files.
 - D27, settled: API answer cache, scheduling and clean stop.
   - Cache (with =-o FILE= only): every third-party answer is appended to =FILE.api-cache= (JSON
@@ -770,19 +788,24 @@
   =dnsclient.py= (servers, protected rule, queries, transfers), =apiclient.py= (the shared
   third-party HTTP function), =apihelp.py=, =apicache.py=, =merge.py= (D56), =ranges.py=, =aio.py=,
   =common.py= (masking, log, times); =proto/ntlm.py=, =proto/certs.py= (certificate names),
-  =proto/net.py= (connections, TLS context), =proto/http.py=; D15's =proto/tls.py= became =certs.py=
-  and =net.py=. Tests: =tests/guard.py= (D29 guard, also loaded by =tests/sitecustomize/= in
-  subprocesses), =tests/fakes.py= (fake network thread, certificates, fake DNS with transfers);
-  =tests/data/= holds only the fixtures the tests load (the other API examples and nmap fixtures
-  stay in =/work/ip2fqdn-sources/=). Operator files: =README.md= (usage) and =LIVE-TESTS.md= (the
-  first live runs, what to send back, and the points inferred from documentation that they check).
-  =.gitignore= leaves out =.venv/=, caches and =ip2fqdn/data/= (downloaded ranges).
+  =proto/net.py= (connections, TLS context), =proto/http.py=, =proto/ber.py= (BER for LDAP and
+  CredSSP), =proto/text.py= (line sessions: SMTP, IMAP, POP3, FTP), =proto/linklocal.py= (mDNS and
+  LLMNR reverse queries); D15's =proto/tls.py= became =certs.py= and =net.py=. Tests:
+  =tests/guard.py= (D29 guard, also loaded by =tests/sitecustomize/= in subprocesses),
+  =tests/fakes.py= (fake network thread, certificates, fake DNS with transfers, scripted
+  line-protocol server), =tests/test_protocols.py= (methods of D58 to D63); =tests/data/= holds only
+  the fixtures the tests load (the other API examples and nmap fixtures stay in
+  =/work/ip2fqdn-sources/=). Operator files: =README.md= (usage) and =LIVE-TESTS.md= (the first live
+  runs, what to send back, and the points inferred from documentation that they check). =.gitignore=
+  leaves out =.venv/=, caches and =ip2fqdn/data/= (downloaded ranges).
 - D53, settled: in IP list files, =#= starts a comment that runs to the end of the line
   (=10.0.0.1 # web= gives 10.0.0.1).
 - D54, settled: over a read limit (D16), HTTP header lines past 64 KB or 100 fields are not
   read and the names from the lines already read are kept (debug line); an SMB reply over 64 KB
   is dropped and counted as an error (warning, D37); a NetBIOS or mDNS datagram cannot exceed
-  64 KB.
+  64 KB. A BER element (LDAP, CredSSP) or TDS message over 64 KB ends the exchange and is
+  counted with the malformed ones (=unreadable replies=); a line session over 100 lines or with a
+  line over 4 KB ends with a warning (=sessions over the read limit=), keeping the rows found.
 - D55, settled (operator, 2026-11-26): host names as input. A command-line argument that is not an
   IP, a CIDR range, =-= or an existing file, or an IP list line that is not an IP or a CIDR range,
   is a name input when it is a host name with at least one dot (kinds =dotted= and =local=: AD
@@ -851,9 +874,86 @@
   redirected (common tools use the terminal that way for password prompts, not for progress); a
   =--log FILE= option keeping stderr on the terminal (one more option, and a rule for where debug
   lines go).
+- D58, settled (operator, 2026-11-27): =ldap= (kind =active=; =default=, =active=, =windows=; ports
+  389 and 3268, nmap services =ldap= and =globalcatLDAP=). One anonymous search, no bind (RFC 4511
+  section 4.5.1): base object the empty DN (the rootDSE), filter =(objectClass=*)=, attributes
+  =dnsHostName=, =defaultNamingContext=, =rootDomainNamingContext=, =namingContexts=. Rows: each
+  =dnsHostName= value (detail =389 rootDSE dnsHostName=). Zones (D20): the DNS form of
+  =defaultNamingContext= and =rootDomainNamingContext= (=DC=corp,DC=example= gives =corp.example=);
+  a server without them (OpenLDAP and others) gives its =namingContexts= made only of =DC= parts.
+  Active Directory answers the rootDSE anonymously, and its host name and naming contexts may differ
+  (nmap's sample: =EDUSRV011.cqure.local= in =DC=cqure,DC=net=), so both are kept. BER read with
+  definite lengths only, one element up to 64 KB, at most 4 messages; anything else is counted
+  (=unreadable replies=). With =ldap= selected, =tls= no longer tries 389 (a port another method
+  takes, D9). Rejected: 636 and 3269 (=tls= reads their certificate); CLDAP on UDP 389 (same data).
+- D59, settled (operator, 2026-11-27): first NTLM step in =rdp= (the backlog's =rdp-ntlm=, built
+  into =rdp= to reuse its connection). When the server selects PROTOCOL_HYBRID or HYBRID_EX
+  ([MS-RDPBCGR]), the client sends after TLS one CredSSP TSRequest ([MS-CSSP] 2.2.1: version 6, the
+  NTLM negotiate message in =negoTokens=; the layout of nmap's =rdp-ntlm-info= request) and reads
+  the server's TSRequest: the NTLM challenge in its first negoToken gives rows (=3389 NTLM DNS
+  computer name=, =3389 NTLM NetBIOS computer name=) and zones; an =errorCode= gives a debug line.
+  The step has its own limits (connect timeout, one element up to 64 KB); when it fails, the
+  certificate rows stay. The connection closes after the challenge.
+- D60, settled (operator, 2026-11-27): =imap= and =pop3= (=default=, =active=, =cert=), and the
+  first NTLM step in =smtp=. Shared line session =proto/text.py= (=smtp='s former code: 100 lines, 4
+  KB per line, QUIT or LOGOUT with a 2 s wait). =imap= (143 plain, 993 TLS; RFC 9051): CAPABILITY;
+  STARTTLS when offered, its certificate gives rows (=143 STARTTLS CN=), then CAPABILITY again;
+  AUTHENTICATE NTLM when a capability list, before or after TLS, holds =AUTH=NTLM=: the negotiate
+  message in base64, the challenge from the =+= line, then =*= cancels; LOGOUT. =pop3= (110 plain,
+  995 TLS; RFC 1939, 2449, 2595, 5034): CAPA; STLS when offered, then CAPA again; AUTH NTLM when a
+  =SASL= line lists NTLM. =smtp=: after STARTTLS, EHLO again (RFC 3207 section 4.2); AUTH NTLM when
+  an EHLO lists NTLM after =AUTH= (RFC 4954; Exchange answers =334 NTLM supported=). Ports nmap
+  reports as TLS are handled like 993 and 995. The NTLM step runs only when offered (nmap's scripts
+  send it regardless), on the TLS connection when there is one, and stops after the challenge.
+  Greeting names are not read in =imap= and =pop3= (operator, option A): the common servers put none
+  in their default greeting (Dovecot, Courier, Exchange 2007 and later), those that do usually
+  answer SMTP on the same IP, and Exchange Online's base64 name is Microsoft's server (Sources,
+  2026-11-27). Steps after the first finds (EHLO or CAPABILITY again, NTLM) have their own
+  connect-timeout limit: a server that stops answering keeps the rows already found. =imap= and
+  =pop3= stay out of =windows= (=smtp=, with the same step, is not in it).
+- D61, settled (operator, 2026-11-27): =ftp= (=default=, =active=, =cert=; port 21, nmap services
+  =ftp= and =ftps=, implicit TLS on ports nmap reports as TLS). Greeting (RFC 959 section 4.2: the
+  lines between the first and the last may hold any text), then =AUTH TLS= (RFC 4217): =234= starts
+  TLS and the certificate gives rows (=21 AUTH TLS CN=); =QUIT=. Greeting name (operator, option B),
+  on a =220= line: the first word when the line has the BSD layout =HOST FTP server (VERSION)= (BSD,
+  Solaris, HP-UX and GNU inetutils ftpd, Kyocera, Konica Minolta, MikroTik, NetBSD-based NAS),
+  unless it is one of the words that take the host's place in that layout in nmap's fingerprints
+  (=VxWorks=, =vxTarget=, =Nucleus=, =ISOS=, =PrNET=, =X5=, =Matrix=, =GuildFTPd=, and =MikroTik=,
+  the routers' default identity) or =localhost=; in other layouts that say =FTP server ... ready=
+  (=HOST Lexmark T650 FTP Server 1.0 ready.=), the first word only when it holds a dot, since a
+  product name can stand there (=Serv-U FTP Server=, =KONICA MINOLTA FTP server=). Detail =21
+  greeting=. Missed: short host names in vendor layouts (Lexmark, Dell, IBM Infoprint, Epson), names
+  elsewhere in the greeting (Synology's =Disk Station FTP server at HOST ready.=). Rejected: any
+  dotted word anywhere (misses short device names, takes vendor addresses).
+- D62, settled (operator, 2026-11-27): =llmnr= (=active= only, off by default like =mdns=; UDP
+  5355). A reverse (PTR) query for each listed IPv4 address, sent to the link-scope group
+  224.0.0.252 with TTL 1; the host that owns the address answers from its own address (unconnected
+  socket). Detail =5355 LLMNR=. Not sent to the IP itself: RFC 4795 section 2.4 sends unicast
+  queries over TCP and has responders discard unicast UDP, and Windows listens on no TCP port and
+  sends its own PTR queries by multicast ([MS-LLMNRP], checked 2026-11-27). Only hosts on the
+  operator's segment answer. IPv6 addresses are counted, not queried (=IPv6 addresses not queried=):
+  the link-local group needs an interface. Whether Windows answers PTR queries for its own address:
+  live run 8.
+- D63, settled (operator, 2026-11-27): =mssql= (=default=, =active=, =windows=; port 1433 and ports
+  nmap reports as =ms-sql-s=). PRELOGIN ([MS-TDS] 2.2.6.5) saying encryption is not supported: a
+  server without forced encryption answers ENCRYPT_NOT_SUP, and the LOGIN7 (2.2.6.4: integrated
+  security, no name or password, the NTLM negotiate message as SSPI data) goes in clear; a server
+  that forces encryption answers ENCRYPT_REQ and closes, and a second connection asks ENCRYPT_ON:
+  the TLS handshake travels in PRELOGIN packets, then every packet is a TLS record (full encryption;
+  TLS 1.2 at most, since TLS 1.3 comes with TDS 8). The SSPI token (0xED) of the answer holds the
+  NTLM challenge: rows (=1433 NTLM DNS computer name=...) and zones; the connection then closes. In
+  =default= (operator, 2026-11-27; first planned off), like =axfr=: SQL Server records error 17830
+  (=Network error code 0x2746 occurred while establishing a connection ... negotiating SSPI ...=,
+  with the client's address) when a client closes during the login (Sources), so the README and
+  =LIVE-TESTS.md= say to add =--skip mssql= when the client has not agreed. With =mssql= selected,
+  =tls= no longer tries 1433 (with nmap input, an open port no other method took, D9), whose TLS
+  handshake may leave a similar entry. Gain: mostly names =smb= already gives (SQL servers are
+  Windows hosts), more where 445 is filtered and 1433 is not. Certificate names not read: the
+  default certificate is the self-signed =SSL_Self_Signed_Fallback=, and the challenge gives the
+  FQDN. TDS messages up to 64 KB; anything else is counted (=unreadable replies=).
 - Status 2026-11-27: steps 1 to 5 done, step 7 done up to delivery (usage notes and this document):
-  the 20 methods and the core are built in =/work/ip2fqdn/= (command declared in =pyproject.toml=,
-  D30), 202 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
+  the 26 methods and the core are built in =/work/ip2fqdn/= (command declared in =pyproject.toml=,
+  D30), 217 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
   masked values, and the usage notes are in =README.md=. The shared-range download was not run: it
   is left to the operator, and the =ranges= code is tested on copies of the documentation samples
   (=tests/data/cloudflare-ips-v4.txt=, =cloudflare-ips-v6.txt=, =aws-ip-ranges-excerpt.json=). Step
@@ -864,7 +964,9 @@
   and unused fixtures removed, live runs in =LIVE-TESTS.md=, this document moved to the project
   root. Live runs so far: Onyphe works (bulk reader fixed for =ip= lists, D47); Shodan next. Host
   names as input added (D55, live run 9 in =LIVE-TESTS.md=); =--merge-results= added (D56);
-  per-method progress (D57); rows without IP for input names without address (D55, 2026-11-27).
+  per-method progress (D57); rows without IP for input names without address (D55, 2026-11-27);
+  methods =ldap=, =mssql=, =imap=, =pop3=, =ftp=, =llmnr= and NTLM steps in =rdp= and =smtp= (D58
+  to D63, 2026-11-27).
   Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule,
   Onyphe error 1005; D16, D45) has no test. Next: the operator installs and runs the tool on real
   data as =LIVE-TESTS.md= describes and shares what it lists (rest of step 7); each real-data fact
@@ -876,8 +978,9 @@
 - A configuration file: methods and settings are chosen on the command line; secrets come
   from environment variables (Goal, D13).
 - Discovering open ports: ports come from module defaults, options or nmap files (D9).
-- Completing a login, or sending credentials to the listed hosts (NTLM methods stop after the
-  server's challenge). =snmp= (backlog) would be an exception, to discuss if adopted.
+- Completing a login, or sending credentials to the listed hosts (NTLM steps in =smb=,
+  =http-ntlm=, =rdp=, =smtp=, =imap=, =pop3= and =mssql= stop after the server's challenge; =ldap=
+  searches without a bind). =snmp= (backlog) would be an exception, to discuss if adopted.
 - Terms of use, licences and commercial-use restrictions of third-party services: handled by
   the operator's legal team; the tool neither shows nor enforces them.
 
@@ -945,7 +1048,55 @@ facts the decisions rely on, with their URLs and dates.
 - mDNS unicast query to UDP 5353 of the host: =host.local= names (Apple, Linux, printers).
   Responders should ignore queries from outside their subnet (RFC 6762, section 5.5), so it
   works on the operator's own segment only.
+- Host names in IMAP, POP3 and FTP greetings (checked 2026-11-27). nmap's
+  =nmap-service-probes= (github.com/nmap/nmap, master): rules that capture a host name (=h/=
+  field): IMAP 72 of 172, POP3 135 of 264, FTP 138 of 778. Position of the name in those rules:
+  first word after the reply code (IMAP 36, POP3 54, FTP 93), APOP stamp =<...@host>= (POP3 41,
+  FTP 1), elsewhere (IMAP 36, POP3 40, FTP 44). Default greetings without a name: Dovecot
+  (=Dovecot ready.=), Courier IMAP, Exchange 2007 and later (=The Microsoft Exchange IMAP4 service
+  is ready.=, default of =Set-ImapSettings -Banner= and =Set-PopSettings -Banner=,
+  learn.microsoft.com), vsftpd, Pure-FTPd, FileZilla Server, Microsoft FTP, Serv-U. Names by
+  default: Exchange 2000 and 2003 (=(host)=), Cyrus, Zimbra, MDaemon, hMailServer, CommuniGate,
+  POP3 APOP stamps (Courier, Kerio, Qpopper, GNU); FTP servers of printers (Lexmark, Dell, Epson,
+  Konica Minolta, Kyocera, IBM Infoprint), MikroTik, Synology, Cisco IronPort and Aironet, and
+  BSD, Solaris, HP-UX and GNU inetutils ftpd, nearly all as =220 HOST ... FTP server ... ready=.
+  Exchange Online appends a base64 UTF-16LE server name (=[SABFADEAUABS...]= decodes to
+  =HE1PR01CA0007.eurprd01.prod.exchangelabs.com=, a fetchmail log quoted by docker-mailserver's
+  documentation): Microsoft's own servers, not the client's. On-premises Exchange: NTLM for IMAP4
+  and POP3 on by default (=EnableGSSAPIAndNTLMAuth=, learn.microsoft.com); =smtp-ntlm-info= on
+  Exchange port 25 returns the internal DNS computer and domain names (collaborationpro.com,
+  2023-11-21).
 
+- LDAP rootDSE (checked 2026-11-27): RFC 4511 sections 4.1.1, 4.5.1, 4.5.2 and 5.1 (message, search
+  request, result entry and done, definite lengths); an Active Directory answer in nmap's
+  =scripts/ldap-rootdse.nse= (=dnsHostName=, =defaultNamingContext=, =ldapServiceName=,
+  =serverName=...).
+- CredSSP (checked 2026-11-27): nmap's =scripts/rdp-ntlm-info.nse=: after the RDP negotiation (SSL,
+  HYBRID and HYBRID_EX requested) and TLS, the TSRequest =30 37 A0 03 02 01 60 A1 30 30 2E 30 2C A0
+  2A 04 28= followed by the 40-byte NTLM negotiate message; the challenge is found in the answer by
+  its signature.
+- NTLM over SMTP, IMAP and POP3 (checked 2026-11-27): nmap's =smtp-ntlm-info=, =imap-ntlm-info= and
+  =pop3-ntlm-info= (STARTTLS or STLS first when possible, then =AUTH NTLM= or =AUTHENTICATE NTLM=,
+  the base64 negotiate message, the challenge on a =334= or =+= line; sent even when not offered);
+  m8sec.dev (2020-03-05): Exchange answers =334 NTLM supported=, then the challenge. RFC 4954 (=*=
+  cancels), RFC 9051 section 6.2.2, RFC 5034, RFC 2449 (CAPA, =SASL=), RFC 2595 (STLS), RFC 3207
+  section 4.2 (EHLO after TLS).
+- FTP (checked 2026-11-27): RFC 959 section 4.2 (multi-line replies), RFC 4217 section 4 (=AUTH
+  TLS=, =234=); greeting layouts and the words in the host's place: =nmap-service-probes= (above).
+- LLMNR (checked 2026-11-27): RFC 4795 sections 2.4 (unicast queries over TCP, unicast UDP
+  discarded, PTR queries) and 2.5; [MS-LLMNRP] (learn.microsoft.com): Windows listens on no TCP port
+  (product behavior note 4), answers only for the computer's host name (note 2), and sends PTR
+  queries by UDP multicast rather than unicast TCP (message processing rules).
+- TDS (checked 2026-11-27): [MS-TDS] PRELOGIN (2.2.6.5: VERSION first; encryption values and
+  negotiation tables: a client sending ENCRYPT_NOT_SUP gets ENCRYPT_NOT_SUP from a server set to
+  OFF, ENCRYPT_REQ and a closed connection from one set to ON; the TLS handshake in PRELOGIN
+  packets, 0x04 packets before TDS 7.2), LOGIN7 (2.2.6.4: fixed part, fIntSecurity, ibSSPI and
+  cbSSPI), Sent TLS/SSL Negotiation Packet State (full encryption: every later packet in TLS);
+  nmap's =scripts/ms-sql-ntlm-info.nse= and =nselib/mssql.lua= (LOGIN7 with NTLM sent without
+  PRELOGIN; servers accept connections without TLS by default; challenge in token 0xED, 2-byte
+  length). Error 17830 on a login the client closes: alihacks.github.io (2020-11-29) and
+  dba.stackexchange.com question 341626, both quoting the message with its =negotiating SSPI=
+  timing.
 ** DNS (no traffic to the target)
 - Reverse DNS (PTR record): 0 or more names (usually 0 or 1), often missing or generic
   (=1-2-3-4.dsl.isp.net=). Internal only through an internal DNS server.
@@ -1124,9 +1275,11 @@ facts the decisions rely on, with their URLs and dates.
 
 * Backlog
 Ideas not adopted for the first version; each waits for a real need.
-- Methods that query the IP (D7): =ftp=, =imap=, =pop3=, =ldap=, =rdp-ntlm=, =mssql=,
-  =dns-chaos=, =snmp= (exception to the credentials rule, see Out of scope), =llmnr=; SMB1 in
-  =smb=; an own DER reader for certificates =cryptography= cannot load (D7).
+- Methods that query the IP (D7): =snmp= (exception to the credentials rule, see Out of
+  scope); =dns-chaos= (little gain, D7); SMB1 in =smb=; an own DER reader for certificates
+  =cryptography= cannot load (D7). =mssql=: TDS 8 (TLS first, SQL Server 2022 strict
+  encryption), SQL Server Browser (UDP 1434) for the dynamic ports of named instances (D63).
+  =llmnr= over IPv6 (D62). =ftp=: short host names in vendor greeting layouts (D61).
 - Timing (D17): speed profiles like nmap's =-T=; a dead-host shortcut.
 - DNS (D19, D21): DNS over HTTPS or TLS; transferring the enclosing reverse zone of each /24,
   found through its SOA (=9.0.10.in-addr.arpa= gives =10.in-addr.arpa=; adds nothing while

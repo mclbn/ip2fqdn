@@ -13,6 +13,7 @@ import pytest
 from conftest import SITE_DIR
 from helpers import make_run, run_cli
 from test_active import http_server, rdp_server
+from test_protocols import ldap_server
 from test_windows import smb_server
 
 from ip2fqdn import dnsclient, runner
@@ -20,7 +21,8 @@ from ip2fqdn.common import Log
 
 WINDOWS, WEB, DEAD, SLOW, DNS = "127.0.1.10", "127.0.1.11", "127.0.1.12", "127.0.1.13", \
     "127.0.1.53"
-METHOD_PORTS = ("tls", "smb", "rdp", "http", "smtp", "netbios", "http-ntlm")
+METHOD_PORTS = ("tls", "smb", "rdp", "http", "smtp", "netbios", "http-ntlm", "ldap", "imap",
+                "pop3", "ftp", "mssql")
 COMMAND = os.path.join(os.path.dirname(sys.executable), "ip2fqdn")
 
 
@@ -62,6 +64,8 @@ def lab():
         network.tcp(WINDOWS, ports["smb"], smb_server(ntlm_vectors.windows_challenge()))
         hybrid = bytes.fromhex("030000130ed00000123400021f080008000000")
         network.tcp(WINDOWS, ports["rdp"], rdp_server(dc_cert, hybrid))
+        network.tcp(WINDOWS, ports["ldap"], ldap_server(
+            {"dnsHostName": ["DC01.corp.test"], "defaultNamingContext": ["DC=corp,DC=test"]}))
         web_context = fakes.server_context(web_cert, {"intranet.corp.test": intranet_cert},
                                            seen)
         network.tcp(WEB, ports["tls"], fakes.tls_handler(web_context), web_context)
@@ -88,6 +92,7 @@ def test_small_lab_default_methods(lab, tmp_path):
     assert found[(WINDOWS, "dc01.corp.test", "smb")]["dns"] == "match"
     assert found[(WINDOWS, "dc01", "smb")]["name_kind"] == "short"
     assert found[(WINDOWS, "dc01.corp.test", "rdp")]["detail"].endswith("RDP CN")
+    assert found[(WINDOWS, "dc01.corp.test", "ldap")]["dns"] == "match"
     assert found[(WINDOWS, "dc01.corp.test", "ptr")]["dns"] == "match"
     assert found[(WINDOWS, "fs01.corp.test", "axfr")]["detail"].startswith("AXFR corp.test")
     assert (WINDOWS, "kdc.corp.test", "dns-enum") in found
@@ -101,6 +106,7 @@ def test_small_lab_default_methods(lab, tmp_path):
     assert ("corp.test", "AXFR") in fake_dns.queries
     assert "tls: 4 IPs" in err and "timeouts" in err
     assert f"output: {output}" in err
+    assert "unexpected" not in err, err
 
 
 def test_protected_rule_without_named_server(lab):

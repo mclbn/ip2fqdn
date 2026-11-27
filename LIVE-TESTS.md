@@ -12,6 +12,8 @@ option. Run them only against networks and services you are allowed to query.
   long run with `tail -f tN.err` in another terminal.
 - The default methods include `axfr`: zone transfer attempts, which DNS servers may log as an
   attack. If the client has not agreed to them, add `--skip axfr`.
+- They also include `mssql`: SQL Server logs each attempt (error 17830, with your address). If
+  the client has not agreed, add `--skip mssql`.
 
 ## What to send back after each run
 
@@ -46,10 +48,13 @@ is one, a few Linux hosts and printers; a domain controller as DNS server.
 
     ip2fqdn 10.1.2.0/24 --dns-server <DC IP> -o t1.csv --debug 2> t1.err
 
-Look for: `smb` and `netbios` rows for Windows hosts and Samba servers; `rdp` rows;
-`http-ntlm` rows on Exchange (`443 /EWS/ ...`) and WinRM (5985, 5986); `ptr` rows and the `dns`
-column (`match` expected for most); `axfr` and `dns-enum` rows (zones learned from the NTLM
-domain names); `sni` values on HTTPS servers; timeouts per method in the summary.
+Look for: `smb` and `netbios` rows for Windows hosts and Samba servers; `rdp` rows, including
+`3389 NTLM DNS computer name` on hosts that require NLA; `ldap` rows on domain controllers (`389
+rootDSE dnsHostName`); `http-ntlm` rows on Exchange (`443 /EWS/ ...`) and WinRM (5985, 5986);
+`smtp`, `imap` and `pop3` NTLM rows on Exchange; `mssql` rows on SQL servers (`1433 NTLM DNS
+computer name`); `ftp` greeting rows on printers, NAS and routers; `ptr` rows and the `dns`
+column (`match` expected for most); `axfr` and `dns-enum` rows (zones learned from the NTLM and
+LDAP domain names); `sni` values on HTTPS servers; timeouts per method in the summary.
 
 ### 2. Same range from an nmap scan
 
@@ -80,7 +85,7 @@ as nmap files, with `--dns-server`.
     ip2fqdn scans/*.xml --dns-server <DC IP> -o t4.csv --debug 2> t4.err
 
 Look for: total time and timeouts in the summary (the estimates in `ip2fqdn.org` are
-not measured: about 10 minutes for 5,000 IPs without nmap input in the worst case); memory
+not measured: about 13 minutes for 5,000 IPs without nmap input in the worst case); memory
 use if you can watch it (`/usr/bin/time -v` gives the maximum resident size).
 
 ### 5. Internet-facing assets, default methods
@@ -91,8 +96,10 @@ The client's public IPs (a few dozen: web, mail and VPN servers, some behind a C
     ip2fqdn public.txt -o t5.csv --debug 2> t5.err
 
 Look for: `tls` and `sni` on real web servers (`served`, `not-served`); `smtp` names, including
-mail servers behind postscreen or a greeting delay (20 s timeout); `http` redirect names; the
-`shared` label on Cloudflare or CloudFront addresses; `generic` labels on provider PTR names.
+mail servers behind postscreen or a greeting delay (20 s timeout), and `smtp` rows with `NTLM`
+in `detail` on an exposed Exchange; `imap` and `pop3` STARTTLS certificates; `http` redirect
+names; the `shared` label on Cloudflare or CloudFront addresses; `generic` labels on provider
+PTR names.
 
 ### 6. Third-party services, twice
 
@@ -120,11 +127,15 @@ also receive transfer requests (only the zone name is sent).
 
     ip2fqdn 10.1.2.0/24 --zones corp.example --dns-server <DC IP> -o t7.csv --debug 2> t7.err
 
-### 8. mDNS on your own segment
+### 8. mDNS and LLMNR on your own segment
 
-Only hosts on the segment you are plugged into answer.
+Only hosts on the segment you are plugged into answer. `llmnr` sends one multicast query per
+IPv4 address of the range to the whole segment.
 
-    ip2fqdn 192.168.1.0/24 -m default,mdns --dns-server <DNS IP> -o t8.csv --debug 2> t8.err
+    ip2fqdn 192.168.1.0/24 -m default,mdns,llmnr --dns-server <DNS IP> -o t8.csv --debug 2> t8.err
+
+Look for: `mdns` rows (`.local` names of Apple and Linux hosts, printers) and `llmnr` rows
+(Windows computer names, Linux hosts running systemd-resolved).
 
 ### 9. Host names as input
 
@@ -160,3 +171,14 @@ Adding a name that does not exist to `names.txt` shows such a row. Second comman
 - `smtp` behind postscreen or a greeting delay (20 s timeout) (run 5).
 - `dns-enum` and `axfr` against Windows DNS; forward confirmation with split views (runs 1, 7).
 - Run times on a full list (run 4).
+- `ldap`: the rootDSE answer of Active Directory and of other directory servers (runs 1, 2).
+- `rdp`: the NTLM challenge in CredSSP with version 6 (nmap sends 0x60) (run 1).
+- `smtp`, `imap`, `pop3`: whether Exchange lists NTLM before TLS, after it, or both (the tool
+  tries NTLM only when listed) (runs 1, 5).
+- `ftp`: the greeting rule on real printers, NAS and routers (run 1); share the greeting lines
+  of devices that gave no row (`[debug]` lines do not hold them: a few `nc HOST 21` outputs).
+- `mssql`: the encryption answer, TLS inside TDS on servers that force encryption (debug
+  lines `no NTLM challenge` with `encryption=`, `unreadable reply`), and the error-log entry if
+  the client's DBA can look (runs 1, 2).
+- `llmnr`: whether Windows and systemd-resolved answer a multicast reverse query for their own
+  address (run 8).

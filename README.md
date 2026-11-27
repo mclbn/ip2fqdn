@@ -64,7 +64,7 @@ a host name.
 | `--connect-timeout S` | TCP connect or UDP reply (default 3) |
 | `--timeout S` | total time per method, IP and port (default 10; `smtp` 20) |
 | `--<method>-timeout S` | same, for one method; wins over `--timeout` |
-| `--<method>-ports LIST` | ports of `tls`, `rdp`, `smb`, `netbios`, `smtp`, `http`, `http-ntlm`, `mdns`; `default,10443` adds, `10443` replaces |
+| `--<method>-ports LIST` | ports of the methods that send traffic (`tls`, `rdp`, `smb`, `ldap`, `mssql`, `netbios`, `smtp`, `imap`, `pop3`, `ftp`, `http`, `http-ntlm`, `mdns`, `llmnr`); `default,10443` adds, `10443` replaces |
 | `--shodan-search` | range searches (query credits) for /24 ranges where Shodan knows 10 IPs or more |
 | `--max-ips N` | largest number of IPs (default 65536) |
 | `--max-zones N` | largest number of zones (default 500) |
@@ -82,11 +82,17 @@ preset is skipped with a note.
     tls         on  active phase 1  default,active,cert         -                     443,8443,9443,636,465,993,995,5986
     rdp         on  active phase 1  default,active,windows,cert -                     3389
     smb         on  active phase 1  default,active,windows      -                     445
+    ldap        on  active phase 1  default,active,windows      -                     389,3268
+    mssql       on  active phase 1  default,active,windows      -                     1433
     netbios     on  active phase 1  default,active,windows      -                     137/udp
     smtp        on  active phase 1  default,active,cert         -                     25,587
+    imap        on  active phase 1  default,active,cert         -                     143,993
+    pop3        on  active phase 1  default,active,cert         -                     110,995
+    ftp         on  active phase 1  default,active,cert         -                     21
     http        on  active phase 1  default,active              -                     80,8080
     http-ntlm   on  active phase 1  default,active,windows      -                     5985,5986,443
     mdns        off active phase 1  active                      -                     5353/udp
+    llmnr       off active phase 1  active                      -                     5355/udp
     ptr         on  dns    phase 1  default,dns,passive         DNS server            -
     axfr        on  dns    phase 2  default,dns                 DNS server            -
     dns-enum    on  dns    phase 2  default,dns,passive         DNS server            -
@@ -103,6 +109,25 @@ preset is skipped with a note.
 Presets: `default` (no Internet needed), `all`, `active` (traffic to the listed IPs), `dns`,
 `api`, `free`, `passive` (nothing sent to the listed IPs; `-m passive,axfr` adds transfers),
 `windows`, `cert`.
+
+What the protocol methods read, none of them logging in (NTLM steps stop at the server's
+challenge, `ldap` sends no bind):
+
+- `ldap`: anonymous rootDSE search; `dnsHostName` (a domain controller's FQDN) and the domain
+  names, which join the zones.
+- `rdp`: certificate name, then, when the server requires NLA, the NTLM challenge (CredSSP).
+- `smtp`, `imap`, `pop3`: STARTTLS certificate names, and the NTLM challenge when the server
+  offers NTLM (Exchange); `imap` and `pop3` also try NTLM inside TLS on 993 and 995. `smtp`
+  also reads the greeting and EHLO names; `imap` and `pop3` read no name from their greeting.
+- `ftp`: the host name opening the greeting (printers, NAS, routers, Unix ftpd: `220 HOST FTP
+  server (VERSION) ready`), and the `AUTH TLS` certificate.
+- `mssql`: the NTLM challenge of a Windows-authentication login.
+- `mdns`, `llmnr` (off by default): reverse queries answered only by hosts on your own segment;
+  `llmnr` sends them by multicast and skips IPv6 addresses.
+
+Two default methods leave entries the client may treat as hostile: `axfr` (zone transfer
+attempts, which DNS servers may log as an attack) and `mssql` (SQL Server logs each attempt as
+error 17830, with your address). Add `--skip axfr,mssql` when the client has not agreed to them.
 
 With nmap input, ports a scan found closed or filtered are skipped, open ports are added by
 service name, `tls` also tries every open TCP port no other method takes, and hosts reported

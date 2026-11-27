@@ -1,15 +1,21 @@
 from ip2fqdn.methods import (
                              axfr,
                              dns_enum,
+                             ftp,
                              http,
                              http_ntlm,
+                             imap,
                              internetdb,
+                             ldap,
+                             llmnr,
                              mdns,
                              mnemonic,
+                             mssql,
                              netbios,
                              nmap_names,
                              onyphe,
                              otx,
+                             pop3,
                              ptr,
                              rdp,
                              shodan,
@@ -21,5 +27,6 @@ from ip2fqdn.methods import (
                              virustotal,
 )
 
-METHODS = [tls, rdp, smb, netbios, smtp, http, http_ntlm, mdns, ptr, axfr, dns_enum, nmap_names,
-           sni, shodan, onyphe, internetdb, otx, virustotal, urlscan, mnemonic]
+METHODS = [tls, rdp, smb, ldap, mssql, netbios, smtp, imap, pop3, ftp, http, http_ntlm, mdns,
+           llmnr, ptr, axfr, dns_enum, nmap_names, sni, shodan, onyphe, internetdb, otx, virustotal,
+           urlscan, mnemonic]

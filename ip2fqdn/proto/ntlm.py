@@ -3,6 +3,8 @@ import binascii
 import re
 import struct
 
+from ip2fqdn.common import Finding
+
 SIGNATURE = b"NTLMSSP\x00\x02\x00\x00\x00"
 NEGOTIATE = base64.b64decode("TlRMTVNTUAABAAAAB4IIogAAAAAAAAAAAAAAAAAAAAAGAbEdAAAADw==")
 NEGOTIATE_B64 = base64.b64encode(NEGOTIATE).decode("ascii")
@@ -93,3 +95,10 @@ def findings_detail(parsed):
 
 def zones(parsed):
     return [parsed[key] for key in ("dns_domain", "dns_tree") if parsed.get(key)]
+
+
+def findings(ip, prefix, parsed, ctx):
+    """Rows for the challenge's computer names (detail PREFIX NTLM ...); its domains become
+    zone candidates (D20)."""
+    ctx.learn_zones(zones(parsed))
+    return [Finding(ip, name, f"{prefix} {detail}") for name, detail in findings_detail(parsed)]

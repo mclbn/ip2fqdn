@@ -128,27 +128,7 @@ def test_http_ntlm_exchange_paths_stop_at_first_challenge():
     assert http_ntlm.requests_for(5985)[0][:2] == ("POST", "/wsman")
 
 
-def smtp_server(script, cert=None):
-    async def handle(reader, writer):
-        try:
-            for expect, send in script:
-                if expect:
-                    line = await reader.readline()
-                    assert line.upper().startswith(expect), line
-                if send == "TLS":
-                    await writer.start_tls(fakes.server_context(cert))
-                    continue
-                if isinstance(send, float):
-                    await asyncio.sleep(send)
-                    continue
-                writer.write(send)
-                await writer.drain()
-            await reader.read(100)
-        except (OSError, asyncio.IncompleteReadError, AssertionError):
-            pass
-        finally:
-            writer.close()
-    return handle
+smtp_server = fakes.script_server
 
 
 def test_smtp_full_session_with_starttls():
@@ -157,7 +137,9 @@ def test_smtp_full_session_with_starttls():
               (None, b"220 mx.corp.test ESMTP\r\n"),
               (b"EHLO [127.0.0.1]", (b"250-mail.corp.test hello\r\n250-SIZE 1000\r\n"
                                      b"250 STARTTLS\r\n")),
-              (b"STARTTLS", b"220 go ahead\r\n"), (None, "TLS"), (b"QUIT", b"221 bye\r\n")]
+              (b"STARTTLS", b"220 go ahead\r\n"), (None, "TLS"),
+              (b"EHLO [127.0.0.1]", b"250-mail.corp.test hello\r\n250 SIZE 1000\r\n"),
+              (b"QUIT", b"221 bye\r\n")]
     with fakes.FakeNetwork() as network:
         port = _serve(network, "127.0.1.44", smtp_server(script, cert))
         found, _ = lookup(smtp, "127.0.1.44", port)

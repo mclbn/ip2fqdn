@@ -20,7 +20,7 @@ from test_end_to_end import DNS, WEB, WINDOWS, lab  # noqa: F401
 from ip2fqdn import apiclient, cli, dnsclient, merge, nmapxml, ranges
 from ip2fqdn.common import UsageError
 from ip2fqdn.methods import axfr, mdns, onyphe, shodan
-from ip2fqdn.proto import certs
+from ip2fqdn.proto import certs, linklocal
 
 
 def test_mdns_reverse_query_with_cache_flush_bit():
@@ -44,7 +44,7 @@ def test_mdns_reverse_query_with_cache_flush_bit():
 @given(st.binary(max_size=200))
 def test_mdns_reply_parser_never_crashes(noise):
     query = dns.message.make_query("1.0.0.10.in-addr.arpa", "PTR")
-    assert mdns.ptr_names(noise, query) is None or isinstance(mdns.ptr_names(noise, query),
+    assert linklocal.ptr_names(noise, query) is None or isinstance(linklocal.ptr_names(noise, query),
                                                               list)
 
 
@@ -218,7 +218,7 @@ def test_certificate_names_hostile():
 
 def test_list_methods_help_and_version():
     code, out, _ = run_cli(["--list-methods"])
-    assert code == 0 and len(out.splitlines()) == 21
+    assert code == 0 and len(out.splitlines()) == 27
     assert out.splitlines()[0].startswith("tls         on  active phase 1")
     stream = io.StringIO()
     cli.build_parser().print_help(stream)

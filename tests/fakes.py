@@ -129,6 +129,33 @@ def tls_handler(context):
     return handle
 
 
+def script_server(script, cert=None, seen=None):
+    """A line-protocol server playing script: (expected start of the client's line or None,
+    bytes to send, "TLS" to start TLS, or a float to wait). A line that does not match ends it."""
+    async def handle(reader, writer):
+        try:
+            for expect, send in script:
+                if expect:
+                    line = await reader.readline()
+                    if seen is not None:
+                        seen.append(line)
+                    assert line.upper().startswith(expect.upper()), line
+                if send == "TLS":
+                    await writer.start_tls(server_context(cert))
+                    continue
+                if isinstance(send, float):
+                    await asyncio.sleep(send)
+                    continue
+                writer.write(send)
+                await writer.drain()
+            await reader.read(100)
+        except (OSError, asyncio.IncompleteReadError, AssertionError):
+            pass
+        finally:
+            writer.close()
+    return handle
+
+
 def silent_handler():
     async def handle(reader, writer):
         try:

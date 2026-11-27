@@ -240,10 +240,10 @@ def test_port_selection_with_nmap(data_dir):
     assert plan.ports_for(tls, "10.20.30.99", nmap) == list(tls.PORTS)
     assert plan.ports_for(tls, "10.20.30.11", nmap) == ()
     web = plan.ports_for(tls, "10.20.30.40", nmap)
-    assert 443 in web and 636 not in web and 8443 in web and 1433 in web
+    assert 443 in web and 636 not in web and 8443 in web and 1433 not in web  # mssql
     assert 25 not in web and 80 not in web
     dc = plan.ports_for(tls, "10.20.30.10", nmap)
-    assert 3389 not in dc and 389 in dc and 53 in dc
+    assert 3389 not in dc and 389 not in dc and 53 in dc  # taken by rdp and ldap
 
 
 def test_presets_and_skip():
