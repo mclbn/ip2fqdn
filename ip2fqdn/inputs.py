@@ -22,6 +22,7 @@ class Inputs:
     ips: list = field(default_factory=list)
     nmap: nmapxml.NmapData = field(default_factory=nmapxml.NmapData)
     names: dict = field(default_factory=dict)  # host name -> "FILE:LINE", None if an argument
+    unresolved: dict = field(default_factory=dict)  # names left out: --dns-server missing (D55)
 
 
 def parse_target(text):

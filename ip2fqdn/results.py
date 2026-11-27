@@ -25,6 +25,18 @@ class Results:
         self.tls_ports = {}
 
     def add(self, finding, source, dated):
+        """Row and name found for the IP: (name, new row, new IP and name pair), None if dropped."""
+        added = self.add_row(finding, source, dated)
+        if added is None:
+            return None
+        name, new_row = added
+        new_pair = (finding.ip, name) not in self.names
+        if new_pair:
+            self.names[(finding.ip, name)] = source
+        return name, new_row, new_pair
+
+    def add_row(self, finding, source, dated):
+        """Row only, e.g. for a host name without address (D55): (name, new row), None if dropped."""
         name = check_name(finding.name)
         if name is None:
             return None
@@ -41,10 +53,7 @@ class Results:
         if finding.detail and finding.detail not in row.details:
             row.details.append(finding.detail)
         _merge_dates(row, first, last)
-        new_pair = (finding.ip, name) not in self.names
-        if new_pair:
-            self.names[(finding.ip, name)] = source
-        return name, new_row, new_pair
+        return name, new_row
 
     def add_zone_candidate(self, name):
         checked = check_name(name)

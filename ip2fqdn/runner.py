@@ -21,6 +21,7 @@ DNS_RANK = {"match": 0, "other": 1, "none": 2, "error": 3}
 SNI_DONE = object()
 # Source of the rows for host names given as input (D55); not a method, so not selectable.
 INPUT = SimpleNamespace(NAME="input", KIND="dns", PHASE=1, PARALLEL=None, TIMEOUT=None)
+NOT_RESOLVED = "not resolved: --dns-server missing"
 
 
 class Run:
@@ -39,6 +40,7 @@ class Run:
         if "sni" in self.contexts:
             self.contexts["sni"].set_total(0)
         self.name_counts = None
+        self.no_address = {}  # input host name without address -> "none" or "error" (D55)
         self.final_warnings = []
         self.previous_rows = None
         self.zones = []
@@ -75,6 +77,8 @@ class Run:
                 task.cancel()
 
     async def resolve_names(self):
+        for name in self.inputs.unresolved:
+            self.results.add_row(Finding("", name, NOT_RESOLVED), INPUT.NAME, dated=False)
         names = self.inputs.names
         if not names or self.dns is None:
             return
@@ -82,9 +86,10 @@ class Run:
         self.input_ctx.set_total(len(names))
         self.input_ctx.begin()
         try:
-            results = await asyncio.gather(*(self._resolve_name(name) for name in names))
+            outcomes = await asyncio.gather(*(self._resolve_name(name) for name in names))
         finally:
             self.input_ctx.running = False
+        results = [findings for findings, _ in outcomes]
         added = {finding.ip for findings in results for finding in findings}
         everything = set(self.inputs.ips) | added
         if len(everything) > self.args.max_ips:
@@ -106,23 +111,37 @@ class Run:
         for findings in results:
             for finding in findings:
                 self.input_ctx.add(finding)
+        for name, (findings, failures) in zip(names, outcomes):
+            if not findings:
+                self._add_no_address(name, failures)
 
     async def _resolve_name(self, name):
-        findings = []
+        """Findings for the name's addresses, and (status, detail) for each answer without one."""
+        findings, failures = [], []
         for server in self.dns.active():
             chains = await asyncio.gather(*(self.dns.chain(server, name, rdtype)
                                             for rdtype in ADDRESS_TYPES))
             for rdtype, (status, values, aliases) in zip(ADDRESS_TYPES, chains):
-                if status != "ok":
-                    continue
-                record = f"{dns.rdatatype.to_text(rdtype)} @{server.label()}"
+                rdtype_text = dns.rdatatype.to_text(rdtype)
                 via = f", CNAME {' > '.join(aliases)}" if aliases else ""
+                if status != "ok":
+                    failures.append((status, f"{rdtype_text} {status} @{server.label()}{via}"))
+                    continue
+                record = f"{rdtype_text} @{server.label()}"
                 for ip in sorted(values, key=sort_key):
                     findings.append(Finding(ip, name, record + via))
                     findings.extend(Finding(ip, alias, f"CNAME of {name}, {record}")
                                     for alias in aliases)
         self.input_ctx.advance()
-        return findings
+        return findings, failures
+
+    def _add_no_address(self, name, failures):
+        """A row without IP keeps the name in the output (D55); dns column: none or error."""
+        statuses = [status for status, _ in failures]
+        all_none = bool(statuses) and all(status == "none" for status in statuses)
+        self.no_address[name] = "none" if all_none else "error"
+        for _, detail in failures or [(None, "")]:
+            self.results.add_row(Finding("", name, detail), INPUT.NAME, dated=True)
 
     def _note_private(self):
         if self.api is None:
@@ -273,6 +292,8 @@ class Run:
             await asyncio.gather(*pending, return_exceptions=True)
 
     def dns_status(self, ip, name):
+        if not ip:
+            return self.no_address.get(name, "")
         task = self.confirmations.get(name)
         if task is None or not task.done() or task.cancelled() or task.exception():
             return ""

@@ -135,8 +135,10 @@ possible), then the same file without `--dns-server`.
     ip2fqdn names.txt -m ptr
 
 Look for: `input` rows (CNAME targets included) and the other names found for each address;
-`input: N host names, M addresses, K without address` in the summary; `shared` labels on CDN
-addresses. Second command: `error: --dns-server missing: ...` and exit code 2 (`echo $?`).
+`input: N host names, M addresses, K without address` in the summary, and one row with an empty
+`ip` per name without address (`dns` `none` or `error`); `shared` labels on CDN addresses.
+Adding a name that does not exist to `names.txt` shows such a row. Second command: `error:
+--dns-server missing: ...` and exit code 2 (`echo $?`).
 
 ## Points inferred from documentation, checked by these runs
 

@@ -361,17 +361,22 @@ def test_merge_rows_rules():
                     first_seen="2026-11-01 10:00 +01:00", last_seen="2026-11-01 10:00 +01:00"),
            _csv_row("10.0.0.2"),
            _csv_row("10.0.0.3", "c.test", "tls", detail="443 CN", sni="served",
-                    first_seen="01/11/2026", last_seen="01/11/2026")]
+                    first_seen="01/11/2026", last_seen="01/11/2026"),
+           _csv_row("", "d.test", "input", detail="A none @10.0.0.53", dns="none"),
+           _csv_row("", "e.test", "input", detail="not resolved: --dns-server missing")]
     new = [_csv_row("10.0.0.1", "a.test", "ptr", detail="PTR @10.0.0.54; PTR @10.0.0.53",
                     name_kind="dotted", first_seen="2026-11-26 09:00 +00:00",
                     last_seen="2026-11-26 09:00 +00:00"),
            _csv_row("10.0.0.2", "b.test", "smb", detail="445 NTLM DNS computer name"),
            _csv_row("10.0.0.3", "c.test", "tls", detail="443 CN", sni="",
                     first_seen="2026-11-26 09:00 +00:00", last_seen="2026-11-26 09:00 +00:00"),
-           _csv_row("10.0.0.4")]
+           _csv_row("10.0.0.4"),
+           _csv_row("10.0.0.5", "d.test", "input", detail="A @10.0.0.53"),
+           _csv_row("10.0.0.6", "e.test", "ptr", detail="PTR @10.0.0.53")]
     merged = merge.merge_rows(old, new)
     assert [(row["ip"], row["fqdn"]) for row in merged] == [
-        ("10.0.0.1", "a.test"), ("10.0.0.2", "b.test"), ("10.0.0.3", "c.test"), ("10.0.0.4", "")]
+        ("10.0.0.1", "a.test"), ("10.0.0.2", "b.test"), ("10.0.0.3", "c.test"), ("10.0.0.4", ""),
+        ("10.0.0.5", "d.test"), ("10.0.0.6", "e.test"), ("", "e.test")]
     first = merged[0]
     assert first["detail"] == "PTR @10.0.0.53; PTR @10.0.0.54"
     assert (first["dns"], first["name_kind"]) == ("match", "dotted")
@@ -400,6 +405,14 @@ def test_merge_reads_only_ip2fqdn_files(tmp_path):
     damaged.write_text(",".join(merge.COLUMNS) + "\n10.0.0.1,a.test,ptr\nnot-an-ip,b.test,ptr\n")
     with pytest.raises(UsageError, match="damaged.csv:3: not an IP in column ip, not merged"):
         merge.read_existing(str(damaged))
+    names = tmp_path / "names.csv"
+    names.write_text(",".join(merge.COLUMNS) + "\n,d.test,input\n")
+    assert [(row["ip"], row["fqdn"]) for row in merge.read_existing(str(names))] == [
+        ("", "d.test")]
+    nameless = tmp_path / "nameless.csv"
+    nameless.write_text(",".join(merge.COLUMNS) + "\n,,input\n")
+    with pytest.raises(UsageError, match="nameless.csv:2: not an IP in column ip, not merged"):
+        merge.read_existing(str(nameless))
 
 
 def test_progress_text():

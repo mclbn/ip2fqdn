@@ -540,7 +540,7 @@
 - D26, settled: CSV output. One row per IP, name and source.
   | Column                    | Content                                                      |
   |---------------------------+--------------------------------------------------------------|
-  | =ip=                      | listed IP                                                    |
+  | =ip=                      | listed IP, or empty for a host name without address (D55)    |
   | =fqdn=                    | name, lowercased, no trailing dot (may be short, =.local= or |
   |                           | wildcard; see =name_kind=)                                   |
   | =source=                  | method name                                                  |
@@ -552,7 +552,7 @@
   | =sni=                     | =served=, =not-served=, =error=, empty if not checked        |
   | =first_seen=, =last_seen= | local zone with offset (=2026-11-24 15:02 +01:00=)           |
   - Sorted by IP (numeric, IPv4 before IPv6), then name, then source. Every listed IP appears; an IP
-    with no name gets a row with only =ip=. Every source passes each name through the same host-name
+    with no name gets a row with only =ip=. Rows without IP (D55) come last. Every source passes each name through the same host-name
     check: ASCII letters, digits, hyphens and underscores, in labels of 1 to 63 characters separated
     by single dots, optionally starting with =*.=, at most 253 characters, not an IP address;
     failures (non-ASCII names included; internationalized names arrive in their =xn--= form) are
@@ -801,7 +801,14 @@
   2). Rows: source =input=, detail =A @SERVER= (with =, CNAME TARGET= when CNAMEs were followed);
   every CNAME target followed gets its own row (=CNAME of NAME, A @SERVER=). Input names are then
   handled like names found by the quick methods: forward confirmation, SNI check, parent domain as
-  zone candidate (D20). A name with no address gets a warning (=FILE:LINE: NAME: no address=; for a
+  zone candidate (D20). No input name is lost (operator, 2026-11-27): a name with no address gets a
+  row without IP, source =input=, =detail= one place per server and type (=A none @SERVER=, =AAAA
+  error @SERVER=, with =, CNAME TARGET= when CNAMEs were followed, so a dangling CNAME shows), =dns=
+  =none= when every answer says no address and =error= otherwise (filled even with
+  =--no-forward-confirm=: it is the input lookup itself), the lookup time as dates; such a name is
+  not counted as found (progress) and goes to no other method. A name left out for want of
+  =--dns-server= gets the same row with =detail= =not resolved: --dns-server missing= and no date.
+  A name with no address also gets a warning (=FILE:LINE: NAME: no address=; for a
   command-line argument, =ARG: no such file, and no address as a host name=, so a mistyped file name
   stays visible; a missing file whose name ends in =.txt=, =.lst=, =.xml=, =.csv=, =.tsv=, =.json=,
   =.nmap= or =.gnmap= stays an input error, =no such file=, exit 2, never a host name); the summary
@@ -817,8 +824,10 @@
   =last_seen= the latest date (a date that does not parse, e.g. after a spreadsheet round trip,
   gives way to one that does), =dns=, =sni=, =labels= and =name_kind= the new value unless it is
   empty (a run without the check does not erase an earlier result). Rows found only in FILE are kept
-  whatever the current input; an IP's row without a name is dropped once the IP has a named row.
-  FILE must start with the tool's header and hold an IP in every =ip= cell; otherwise exit 2 before
+  whatever the current input; an IP's row without a name is dropped once the IP has a named row,
+  and a host name's row without IP (D55) once the name has an =input= row with an IP. FILE must
+  start with the tool's header and hold an IP in every =ip= cell, or an empty cell beside a name
+  (D55); otherwise exit 2 before
   any traffic, FILE left as it is (=FILE: not an ip2fqdn CSV (header differs), not merged=;
   =FILE:LINE: not an IP in column ip, not merged=). Summary note: =FILE: N rows before, M after
   merge=. The CSV is written to =FILE.tmp= and then renamed over FILE, with or without the option,
@@ -842,9 +851,9 @@
   redirected (common tools use the terminal that way for password prompts, not for progress); a
   =--log FILE= option keeping stderr on the terminal (one more option, and a rule for where debug
   lines go).
-- Status 2026-11-26: steps 1 to 5 done, step 7 done up to delivery (usage notes and this document):
+- Status 2026-11-27: steps 1 to 5 done, step 7 done up to delivery (usage notes and this document):
   the 20 methods and the core are built in =/work/ip2fqdn/= (command declared in =pyproject.toml=,
-  D30), 201 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
+  D30), 202 tests pass (fake servers on loopback), =ruff= is clean, a =--debug= run shows only
   masked values, and the usage notes are in =README.md=. The shared-range download was not run: it
   is left to the operator, and the =ranges= code is tested on copies of the documentation samples
   (=tests/data/cloudflare-ips-v4.txt=, =cloudflare-ips-v6.txt=, =aws-ip-ranges-excerpt.json=). Step
@@ -855,7 +864,8 @@
   and unused fixtures removed, live runs in =LIVE-TESTS.md=, this document moved to the project
   root. Live runs so far: Onyphe works (bulk reader fixed for =ip= lists, D47); Shodan next. Host
   names as input added (D55, live run 9 in =LIVE-TESTS.md=); =--merge-results= added (D56);
-  per-method progress (D57). Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule,
+  per-method progress (D57); rows without IP for input names without address (D55, 2026-11-27).
+  Known test gap: HTTP 429 handling (waits, VirusTotal's quota rule,
   Onyphe error 1005; D16, D45) has no test. Next: the operator installs and runs the tool on real
   data as =LIVE-TESTS.md= describes and shares what it lists (rest of step 7); each real-data fact
   becomes a test fixture and a dated entry under Sources before the code is fixed.

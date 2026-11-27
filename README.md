@@ -41,8 +41,12 @@ Without `--dns-server`, stderr starts and ends with `--dns-server missing: N hos
 input not resolved (...)`, and a run with only names stops (exit 2): add the client's DNS
 server, or a public resolver such as 1.1.1.1 for public names. The addresses found join the
 list (they count toward `--max-ips`) and each name gets a row with source `input`, as does each
-CNAME target followed. A name with no address gets a warning; a missing file ending in `.txt`,
-`.xml` and the like is an error, never a host name.
+CNAME target followed. No listed name is lost: a name with no address gets a warning and a row
+with an empty `ip`, `detail` giving each answer (`A none @10.0.0.10, CNAME old.cdn.example`) and
+`dns` saying `none` (every server says it has no address) or `error` (a server failed: run
+again); a name left out for want of `--dns-server` gets such a row too (`not resolved:
+--dns-server missing`). A missing file ending in `.txt`, `.xml` and the like is an error, never
+a host name.
 
 ## Options
 
@@ -122,11 +126,12 @@ of each name found, kept when a DNS server returns its SOA.
 ## Output
 
 CSV, UTF-8, header line, sorted by IP, then name, then source; every listed IP appears (an IP
-without names gets a row with only `ip`). Control characters are written `\xNN`.
+without names gets a row with only `ip`), and so does every listed host name (rows without IP
+come last). Control characters are written `\xNN`.
 
 | Column | Content |
 |---|---|
-| `ip` | listed IP, or an address of a listed host name |
+| `ip` | listed IP, or an address of a listed host name; empty for a listed host name without address |
 | `fqdn` | name, lowercased, no trailing dot |
 | `source` | method; `input` for a listed host name and the CNAME targets followed |
 | `detail` | where the name came from (`443 SAN`, `PTR @10.0.0.10`, `445 NTLM DNS computer name`, `A @10.0.0.10, CNAME edge.cdn.example`), `; ` between places |
@@ -162,8 +167,9 @@ Merging: with `--merge-results`, the rows already in the `-o` file are kept, wha
 current input, and the new ones are added. A row that is already there (same `ip`, `fqdn` and
 `source`) is updated: places added to `detail`, earliest `first_seen` and latest `last_seen`,
 newer `dns`, `sni` and `labels` unless the new run left them empty. An IP's empty row goes once
-it has a name. A file that is not an ip2fqdn CSV (other header, a cell of `ip` that is not an
-IP) stops the run before any traffic (exit 2) and is left as it is. Stderr: `FILE: N rows
+it has a name, and a host name's row without IP once the name has an address. A file that is
+not an ip2fqdn CSV (other header, a cell of `ip` that is not an IP, or empty with no name)
+stops the run before any traffic (exit 2) and is left as it is. Stderr: `FILE: N rows
 before, M after merge`, or `FILE: new file`. Without the option the file is replaced. Either
 way the CSV is written to `FILE.tmp` and then renamed, so an interruption never leaves half a
 file.

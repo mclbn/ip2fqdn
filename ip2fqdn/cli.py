@@ -186,7 +186,7 @@ def _unresolved_names(args, inputs, log):
     text = (f"--dns-server missing: {len(names)} host names in the input not resolved ({shown}); "
             "host names are resolved only by servers given with --dns-server, such as the "
             "client's DNS server or 1.1.1.1 for public names")
-    inputs.names = {}
+    inputs.unresolved, inputs.names = inputs.names, {}
     if not inputs.ips:
         raise UsageError(text)
     log.warning(text)

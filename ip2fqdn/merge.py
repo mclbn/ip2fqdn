@@ -2,9 +2,8 @@ import csv
 import datetime
 import ipaddress
 
-from ip2fqdn.addresses import sort_key
 from ip2fqdn.common import UsageError
-from ip2fqdn.output import COLUMNS
+from ip2fqdn.output import COLUMNS, row_order
 
 # Columns where the newer row wins unless its value is empty (D56).
 NEWEST = ("name_kind", "labels", "dns", "sni")
@@ -39,7 +38,8 @@ def _read_rows(reader, path):
             continue
         row = dict(zip(COLUMNS, values + [""] * (len(COLUMNS) - len(values))))
         try:
-            ipaddress.ip_address(row["ip"])
+            if row["ip"] or not row["fqdn"]:  # a host name without address has no IP (D55)
+                ipaddress.ip_address(row["ip"])
         except ValueError:
             raise UsageError(f"{path}:{reader.line_num}: not an IP in column ip, "
                              "not merged") from None
@@ -55,9 +55,19 @@ def merge_rows(old, new):
         kept = merged.get(key)
         merged[key] = row if kept is None else _combine(kept, row)
     named = {ip for ip, fqdn, _ in merged if fqdn}
-    rows = [row for (ip, fqdn, _), row in merged.items() if fqdn or ip not in named]
-    rows.sort(key=lambda row: (sort_key(row["ip"]), row["fqdn"], row["source"]))
+    resolved = {fqdn for ip, fqdn, source in merged if ip and source == "input"}
+    rows = [row for key, row in merged.items() if _kept(key, named, resolved)]
+    rows.sort(key=row_order)
     return rows
+
+
+def _kept(key, named, resolved):
+    """An IP's row without name goes once the IP has a name; a host name's row without address
+    goes once the name has an address (D56)."""
+    ip, fqdn, source = key
+    if not fqdn:
+        return ip not in named
+    return bool(ip) or source != "input" or fqdn not in resolved
 
 
 def _combine(kept, row):

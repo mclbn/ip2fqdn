@@ -119,6 +119,7 @@ def name_records():
             ("app.corp.test", "CNAME"): ["edge.cdn.test."],
             ("edge.cdn.test", "A"): ["127.0.1.11", "127.0.1.12"],
             ("v6.corp.test", "AAAA"): ["::1"],
+            ("old.corp.test", "CNAME"): ["gone.cdn.test."],
             ("11.1.0.127.in-addr.arpa", "PTR"): ["web01.corp.test."],
             ("corp.test", "SOA"): ["ns1.corp.test. admin.corp.test. 1 60 60 60 60"]}
 
@@ -131,7 +132,8 @@ def test_host_name_inputs(tmp_path):
         port = fakes.start_dns(network, DNS, fake)
         server = f"{DNS}:{port}"
         code, out, err = run_cli([str(listing), "app.corp.test", "v6.corp.test", "ips.tx",
-                                  "-m", "ptr,dns-enum", f"--dns-server={server}"])
+                                  "old.corp.test", "-m", "ptr,dns-enum",
+                                  f"--dns-server={server}"])
         too_many = run_cli(["app.corp.test", "--max-ips", "1", "-m", "ptr",
                             f"--dns-server={server}"])
     assert code == 0, err
@@ -147,7 +149,18 @@ def test_host_name_inputs(tmp_path):
     assert ("corp.test", "SOA") in fake.queries
     assert f"{listing}:2: missing.corp.test: no address" in err
     assert "ips.tx: no such file, and no address as a host name" in err
-    assert "input: 5 host names, 3 addresses, 2 without address" in err
+    assert "input: 6 host names, 3 addresses, 3 without address" in err
+    missing = rows[("", "missing.corp.test", "input")]
+    assert (missing["detail"], missing["dns"], missing["name_kind"]) == (
+        f"A none @{server}; AAAA none @{server}", "none", "dotted")
+    assert missing["first_seen"] and missing["last_seen"]
+    dangling = rows[("", "old.corp.test", "input")]["detail"]
+    assert dangling == (f"A none @{server}, CNAME gone.cdn.test; "
+                        f"AAAA none @{server}, CNAME gone.cdn.test")
+    assert [row["fqdn"] for row in _rows(out) if not row["ip"]] == [
+        "ips.tx", "missing.corp.test", "old.corp.test"]
+    ips = [row["ip"] for row in _rows(out)]
+    assert ips[-3:] == ["", "", ""] and "" not in ips[:-3]
     assert too_many[0] == 2 and "more than 1 IPs to look up" in too_many[2]
 
 
@@ -166,10 +179,29 @@ def test_host_names_need_named_server(monkeypatch):
     assert err.rindex(message) > err.index("total time")
     assert ("99.59.83.51.in-addr.arpa", "PTR") in fake.queries
     assert not [query for query in fake.queries if query[0].endswith("corp.test")]
-    assert [row["ip"] for row in _rows(out)] == ["51.83.59.99"]
+    assert [row["ip"] for row in _rows(out)] == ["51.83.59.99", ""]
+    unresolved = _rows(out)[1]
+    assert (unresolved["fqdn"], unresolved["source"], unresolved["detail"]) == (
+        "www.corp.test", "input", "not resolved: --dns-server missing")
+    assert (unresolved["dns"], unresolved["first_seen"]) == ("", "")
     assert only_names[0] == 2
     assert "error: --dns-server missing: 2 host names in the input not resolved " \
         "(www.corp.test, app.corp.test)" in only_names[2]
+
+
+def test_host_name_without_address_after_error(monkeypatch):
+    monkeypatch.setattr(dnsclient, "ATTEMPT_TIMEOUT", 0.05)
+    with fakes.FakeNetwork() as network:
+        port = fakes.start_dns(network, DNS, fakes.FakeDns(name_records()))
+        silent = fakes.start_dns(network, SLOW, fakes.FakeDns(silent=True))
+        code, out, err = run_cli(["missing.corp.test", "-m", "ptr",
+                                  f"--dns-server={DNS}:{port},{SLOW}:{silent}"])
+    assert code == 0, err
+    [row] = _rows(out)
+    assert (row["ip"], row["fqdn"], row["source"], row["dns"]) == (
+        "", "missing.corp.test", "input", "error")
+    assert row["detail"] == (f"A none @{DNS}:{port}; AAAA none @{DNS}:{port}; "
+                             f"A error @{SLOW}:{silent}; AAAA error @{SLOW}:{silent}")
 
 
 def test_merge_results(tmp_path):

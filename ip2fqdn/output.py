@@ -18,9 +18,14 @@ def build_rows(run, shared):
     for ip in run.inputs.ips:
         if ip not in named_ips:
             rows.append({"ip": ip})
-    rows.sort(key=lambda item: (sort_key(item["ip"]), item.get("fqdn", ""),
-                                item.get("source", "")))
+    rows.sort(key=row_order)
     return rows
+
+
+def row_order(row):
+    """IP (numeric, IPv4 first), then name, then source; rows without IP (D55) last."""
+    ip = row["ip"]
+    return (not ip, sort_key(ip) if ip else (), row.get("fqdn", ""), row.get("source", ""))
 
 
 def _csv_row(run, row, shared):
@@ -29,7 +34,7 @@ def _csv_row(run, row, shared):
         labels.append("generic")
     if is_placeholder(row.name):
         labels.append("placeholder")
-    if shared is not None and shared.contains(row.ip):
+    if shared is not None and row.ip and shared.contains(row.ip):
         labels.append("shared")
     return {"ip": row.ip, "fqdn": row.name, "source": row.source,
             "detail": "; ".join(row.details), "name_kind": name_kind(row.name),
